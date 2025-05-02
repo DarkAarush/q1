@@ -46,9 +46,19 @@ def load_quizzes(category):
         logger.error(f"No quizzes found for category '{category}'.")
     return quizzes
 
-def get_daily_quiz_limit():
-    """Set daily quiz limit (constant value)."""
-    return 10
+
+
+def get_daily_quiz_limit(chat_type):
+    """
+    Set daily quiz limit based on chat type.
+    :param chat_type: Type of chat ('private', 'group', or 'supergroup').
+    :return: Daily quiz limit.
+    """
+    if chat_type == 'private':
+        return 5  # Daily limit for private chats
+    else:
+        return 10  # Daily limit for groups/supergroups
+
 
 @retry_on_failure
 def send_quiz(context: CallbackContext):
@@ -123,7 +133,46 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
     )
 
     try:
-        # Send the quiz as a poll
+    # Send the quiz as a poll
+    message = context.bot.send_poll(
+        chat_id=chat_id,
+        question=question["question"],
+        options=question["options"],
+        type="quiz",
+        correct_option_id=question["correct_option_id"],
+        is_anonymous=False
+    )
+
+    # Increment the count of quizzes sent today
+    quizzes_sent_collection.update_one(
+        {"chat_id": chat_id, "date": today},
+        {"$inc": {"count": 1}}
+    )
+
+    # Store the poll ID to handle answers
+    context.bot_data[message.poll.id] = {
+        "chat_id": chat_id,
+        "correct_option_id": question["correct_option_id"]
+    }
+except BadRequest as e:
+    logger.error(f"Failed to send quiz to chat {chat_id}: {e}")
+
+    # Retry sending any available quiz directly
+    available_questions = [q for q in questions if q["_id"] not in used_question_ids]
+    if not available_questions:
+        context.bot.send_message(chat_id=chat_id, text="No more quizzes are available.")
+        return
+
+    # Select another random question
+    question = random.choice(available_questions)
+    used_quizzes_collection.update_one(
+        {"chat_id": chat_id},
+        {"$push": {"used_questions": question["_id"]}},
+        upsert=True
+    )
+
+    try:
+        # Attempt to send the new quiz as a poll
         message = context.bot.send_poll(
             chat_id=chat_id,
             question=question["question"],
@@ -144,10 +193,8 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
             "chat_id": chat_id,
             "correct_option_id": question["correct_option_id"]
         }
-    except BadRequest as e:
-        logger.error(f"Failed to send quiz to chat {chat_id}: {e}")
-        context.bot.send_message(chat_id=chat_id, text="Failed to send quiz. Please check the chat ID and permissions.")
-
+    except Exception as retry_error:
+        logger.error(f"Retry failed for chat {chat_id}: {retry_error}")
 
 
 @retry_on_failure
