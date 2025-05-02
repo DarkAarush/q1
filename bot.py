@@ -361,6 +361,14 @@ def stop_quiz(update: Update, context: CallbackContext):
     stop_quiz_for_chat(chat_id, context)
     update.message.reply_text("Quiz stopped successfully.")
 
+def reset_ignored_chats(context: CallbackContext):
+    """
+    Reset the ignored chats list to allow quizzes for all chats.
+    """
+    db["ignored_chats"].delete_many({})  # Clear the ignored chats collection
+
+# Schedule this job to run daily at midnight
+job_queue.run_daily(reset_ignored_chats, time=datetime.time(0, 0))
 
 
 def pause_quiz(update: Update, context: CallbackContext):
