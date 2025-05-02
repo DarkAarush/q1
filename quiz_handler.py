@@ -131,31 +131,30 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
         {"$push": {"used_questions": question["_id"]}},
         upsert=True
     )
-    
-try:
-    # Send the quiz as a poll
-    message = context.bot.send_poll(
-        chat_id=chat_id,
-        question=question["question"],
-        options=question["options"],
-        type="quiz",
-        correct_option_id=question["correct_option_id"],
-        is_anonymous=False
-    )
+    try:
+        message = context.bot.send_poll(
+            chat_id=chat_id,
+            question=question["question"],
+            options=question["options"],
+            type="quiz",
+            correct_option_id=question["correct_option_id"],
+            is_anonymous=False
+            )
 
     # Increment the count of quizzes sent today
-    quizzes_sent_collection.update_one(
-        {"chat_id": chat_id, "date": today},
-        {"$inc": {"count": 1}}
-    )
+        quizzes_sent_collection.update_one(
+            {"chat_id": chat_id, "date": today},
+            {"$inc": {"count": 1}}
+            )
 
     # Store the poll ID to handle answers
-    context.bot_data[message.poll.id] = {
-        "chat_id": chat_id,
-        "correct_option_id": question["correct_option_id"]
-    }
-except BadRequest as e:
-    logger.error(f"Failed to send quiz to chat {chat_id}: {e}")
+    
+        context.bot_data[message.poll.id] = {
+            "chat_id": chat_id,
+            "correct_option_id": question["correct_option_id"]
+            }
+    except BadRequest as e:
+        logger.error(f"Failed to send quiz to chat {chat_id}: {e}")
 
     # Retry sending any available quiz directly
     available_questions = [q for q in questions if q["_id"] not in used_question_ids]
