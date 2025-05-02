@@ -57,14 +57,29 @@ def send_quiz(context: CallbackContext):
     chat_id = context.job.context['chat_id']
     send_quiz_logic(context, chat_id)
 
+def should_ignore_chat(chat_id):
+    """
+    Check if a chat should be ignored.
+    """
+    ignored_chats = db["ignored_chats"].find_one({"chat_id": chat_id})
+    return ignored_chats is not None
+
+def add_to_ignored_chats(chat_id):
+    """
+    Add a chat to the ignored chats collection.
+    """
+    db["ignored_chats"].update_one({"chat_id": chat_id}, {"$set": {"ignored": True}}, upsert=True)
+
+@retry_on_failure
 def send_quiz_logic(context: CallbackContext, chat_id: int):
     """
     Core logic for sending a quiz to the chat.
-    :param context: CallbackContext
-    :param chat_id: Chat ID where the quiz needs to be sent.
     """
-    chat_data = load_chat_data(chat_id)
+    if should_ignore_chat(chat_id):
+        context.bot.send_message(chat_id=chat_id, text="This chat is being ignored for quizzes.")
+        return
 
+    chat_data = load_chat_data(chat_id)
     category = chat_data.get('category')  # Default category if not set
     questions = load_quizzes(category)
 
@@ -72,10 +87,7 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
         context.bot.send_message(chat_id=chat_id, text="No questions available for this category.")
         return
 
-    # Fetch today's date
     today = datetime.now().date().isoformat()
-
-    # Get the count of quizzes already sent for this chat today
     quizzes_sent = quizzes_sent_collection.find_one({"chat_id": chat_id, "date": today})
     if not quizzes_sent:
         quizzes_sent_collection.insert_one({"chat_id": chat_id, "date": today, "count": 0})
@@ -84,7 +96,9 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
     daily_limit = get_daily_quiz_limit()
 
     if quizzes_sent["count"] >= daily_limit:
-        context.bot.send_message(chat_id=chat_id, text="Daily quiz limit reached. The next quiz will be sent tomorrow.")
+        context.bot.send_message(chat_id=chat_id, text="Daily quiz limit reached. This chat will be ignored for quizzes.")
+        add_to_ignored_chats(chat_id)
+        stop_quiz_for_chat(chat_id, context)  # Stop the quiz job
         return
 
     # Fetch the list of used questions for the current chat
