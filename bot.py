@@ -371,12 +371,12 @@ def reset_ignored_chats(context):
     db["ignored_chats"].delete_many({})  # Clear the ignored chats collection
     print("Ignored chats have been reset.")
 
-# Schedule the job to run daily at midnight
-job_queue.run_daily(reset_ignored_chats, time=time(0, 0))
+# # Schedule the job to run daily at midnight
+# job_queue.run_daily(reset_ignored_chats, time=time(0, 0))
 
-# Start the bot
-updater.start_polling()
-updater.idle()
+# # Start the bot
+# updater.start_polling()
+# updater.idle()
 
 
 def pause_quiz(update: Update, context: CallbackContext):
@@ -523,6 +523,7 @@ def main():
     
     updater.start_polling()
     updater.job_queue.run_once(restart_active_quizzes, 0)
+    job_queue.run_daily(reset_ignored_chats, time=time(0, 0))
 
     updater.idle()
 
