@@ -342,24 +342,27 @@ def start_quiz(update: Update, context: CallbackContext):
     context.job_queue.run_repeating(send_quiz, interval=interval, first=interval, context={"chat_id": chat_id, "used_questions": []})
 
 
-def stop_quiz_for_chat(chat_id: str, context: CallbackContext):
+def stop_quiz(update: Update, context: CallbackContext):
     """
-    Stop the quiz job for a specific chat.
+    Stop the quiz job for the current chat.
     """
-    jobs = context.job_queue.jobs()
-    for job in jobs:
-        if job.context and job.context["chat_id"] == chat_id:
-            job.schedule_removal()
-
+    chat_id = str(update.effective_chat.id)
     chat_data = load_chat_data(chat_id)
+
+    # If there's active quiz data for the chat
     if chat_data:
         chat_data["active"] = False
         save_chat_data(chat_id, chat_data)
 
-def stop_quiz(update: Update, context: CallbackContext):
-    chat_id = str(update.effective_chat.id)
-    stop_quiz_for_chat(chat_id, context)
-    update.message.reply_text("Quiz stopped successfully.")
+        # Remove the scheduled job for this chat
+        jobs = context.job_queue.jobs()
+        for job in jobs:
+            if job.context and job.context["chat_id"] == chat_id:
+                job.schedule_removal()
+
+        update.message.reply_text("Quiz stopped successfully.")
+    else:
+        update.message.reply_text("No active quiz to stop.")
 
 def reset_ignored_chats(context: CallbackContext):
     """
