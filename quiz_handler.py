@@ -62,8 +62,8 @@ def should_ignore_chat(chat_id):
     """
     Check if a chat should be ignored.
     """
-    ignored_chats = db["ignored_chats"].find_one({"chat_id": chat_id})
-    return ignored_chats is not None
+    ignored_chat = db["ignored_chats"].find_one({"chat_id": chat_id})
+    return ignored_chat is not None
 
 def add_to_ignored_chats(chat_id):
     """
@@ -76,9 +76,9 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
     """
     Core logic for sending a quiz to the chat.
     """
+    # Check if the chat should be ignored
     if should_ignore_chat(chat_id):
-        context.bot.send_message(chat_id=chat_id, text="This chat is being ignored for quizzes.")
-        return
+        return  # Avoid sending quizzes to ignored chats
 
     chat_data = load_chat_data(chat_id)
     category = chat_data.get('category')  # Default category if not set
@@ -96,19 +96,17 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
 
     daily_limit = get_daily_quiz_limit()
 
+    # If the daily limit is reached, notify the user once, then ignore the chat
     if quizzes_sent["count"] >= daily_limit:
-        context.bot.send_message(chat_id=chat_id, text="Daily quiz limit reached. This chat will be ignored for quizzes.")
-        add_to_ignored_chats(chat_id)
-        stop_quiz_for_chat(chat_id, context)  # Stop the quiz job
+        context.bot.send_message(chat_id=chat_id, text="Daily quiz limit reached. Tomorrow you will receive new quizzes.")
+        add_to_ignored_chats(chat_id)  # Add the chat to the ignored list
         return
 
-    # Fetch the list of used questions for the current chat
+    # Continue with quiz selection and sending logic
     used_question_ids = used_quizzes_collection.find_one({"chat_id": chat_id})
     used_question_ids = used_question_ids["used_questions"] if used_question_ids else []
 
-    # Filter out used questions
-    available_questions = [q for q in questions if q['_id'] not in used_question_ids]
-
+    available_questions = [q for q in questions if q["_id"] not in used_question_ids]
     if not available_questions:
         context.bot.send_message(chat_id=chat_id, text="All quizzes have been used. No more quizzes are available.")
         return
@@ -119,7 +117,7 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
     # Mark the question as used
     used_quizzes_collection.update_one(
         {"chat_id": chat_id},
-        {"$push": {"used_questions": question['_id']}},
+        {"$push": {"used_questions": question["_id"]}},
         upsert=True
     )
 
@@ -127,10 +125,10 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
         # Send the quiz as a poll
         message = context.bot.send_poll(
             chat_id=chat_id,
-            question=question['question'],
-            options=question['options'],
-            type='quiz',
-            correct_option_id=question['correct_option_id'],
+            question=question["question"],
+            options=question["options"],
+            type="quiz",
+            correct_option_id=question["correct_option_id"],
             is_anonymous=False
         )
 
@@ -139,16 +137,16 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
             {"chat_id": chat_id, "date": today},
             {"$inc": {"count": 1}}
         )
+
+        # Store the poll ID to handle answers
+        context.bot_data[message.poll.id] = {
+            "chat_id": chat_id,
+            "correct_option_id": question["correct_option_id"]
+        }
     except BadRequest as e:
         logger.error(f"Failed to send quiz to chat {chat_id}: {e}")
         context.bot.send_message(chat_id=chat_id, text="Failed to send quiz. Please check the chat ID and permissions.")
-        return
 
-    # Store the poll ID to handle answers
-    context.bot_data[message.poll.id] = {
-        'chat_id': chat_id,
-        'correct_option_id': question['correct_option_id']
-    }
 
 @retry_on_failure
 def send_quiz_immediately(context: CallbackContext, chat_id: int):
