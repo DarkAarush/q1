@@ -47,7 +47,7 @@ def load_quizzes(category):
 
 def get_daily_quiz_limit():
     """Set daily quiz limit (constant value)."""
-    return 100
+    return 10
 
 @retry_on_failure
 def send_quiz(context: CallbackContext):
