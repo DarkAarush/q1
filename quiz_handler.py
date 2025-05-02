@@ -1,6 +1,7 @@
 import logging
 from telegram import Update
 from telegram.ext import CallbackContext
+from bot import stop_quiz_for_chat
 from chat_data_handler import load_chat_data
 from leaderboard_handler import add_score
 from pymongo import MongoClient
