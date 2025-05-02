@@ -12,6 +12,7 @@ from datetime import datetime
 from pymongo import MongoClient
 import threading
 import time
+from datetime import time
 # Enable logging
 from bot_logging import logger
 
@@ -363,15 +364,19 @@ def stop_quiz(update: Update, context: CallbackContext):
         update.message.reply_text("Quiz stopped successfully.")
     else:
         update.message.reply_text("No active quiz to stop.")
-
-def reset_ignored_chats(context: CallbackContext):
+def reset_ignored_chats(context):
     """
     Reset the ignored chats list to allow quizzes for all chats.
     """
     db["ignored_chats"].delete_many({})  # Clear the ignored chats collection
+    print("Ignored chats have been reset.")
 
-# Schedule this job to run daily at midnight
-job_queue.run_daily(reset_ignored_chats, time=datetime.time(0, 0))
+# Schedule the job to run daily at midnight
+job_queue.run_daily(reset_ignored_chats, time=time(0, 0))
+
+# Start the bot
+updater.start_polling()
+updater.idle()
 
 
 def pause_quiz(update: Update, context: CallbackContext):
