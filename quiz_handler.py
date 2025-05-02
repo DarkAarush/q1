@@ -77,9 +77,6 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
     """
     Core logic for sending a quiz to the chat.
     """
-    if should_ignore_chat(chat_id):
-        return  # Avoid sending quizzes to ignored chats
-
     chat_data = load_chat_data(chat_id)
     category = chat_data.get('category')  # Default category if not set
     questions = load_quizzes(category)
@@ -90,15 +87,25 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
 
     today = datetime.now().date().isoformat()
     quizzes_sent = quizzes_sent_collection.find_one({"chat_id": chat_id, "date": today})
+    
     if not quizzes_sent:
-        quizzes_sent_collection.insert_one({"chat_id": chat_id, "date": today, "count": 0})
-        quizzes_sent = {"count": 0}
+        # Initialize tracking for this chat and date if not already present
+        quizzes_sent_collection.insert_one({"chat_id": chat_id, "date": today, "count": 0, "limit_reached": False})
+        quizzes_sent = {"count": 0, "limit_reached": False}
 
     daily_limit = get_daily_quiz_limit()
 
-    # If the daily limit is reached, always send the message
+    # Check if the daily limit has been reached
     if quizzes_sent["count"] >= daily_limit:
+        # If the limit is reached, send the message (whether it's the first time or subsequent attempts)
         context.bot.send_message(chat_id=chat_id, text="Daily quiz limit reached. Tomorrow you will receive new quizzes.")
+
+        # Mark limit as reached if not already marked
+        if not quizzes_sent.get("limit_reached"):
+            quizzes_sent_collection.update_one(
+                {"chat_id": chat_id, "date": today},
+                {"$set": {"limit_reached": True}}
+            )
         return  # Stop further processing
 
     # Continue with quiz selection and sending logic
@@ -145,7 +152,6 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
     except BadRequest as e:
         logger.error(f"Failed to send quiz to chat {chat_id}: {e}")
         context.bot.send_message(chat_id=chat_id, text="Failed to send quiz. Please check the chat ID and permissions.")
-
 
 @retry_on_failure
 def send_quiz_immediately(context: CallbackContext, chat_id: int):
