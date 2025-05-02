@@ -131,16 +131,17 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
         {"$push": {"used_questions": question["_id"]}},
         upsert=True
     )
-
-    try:
-        message = context.bot.send_poll(
-            chat_id=chat_id,
-            question=question["question"],
-            options=question["options"],
-            type="quiz",
-            correct_option_id=question["correct_option_id"],
-            is_anonymous=False
-        )
+    
+try:
+    # Send the quiz as a poll
+    message = context.bot.send_poll(
+        chat_id=chat_id,
+        question=question["question"],
+        options=question["options"],
+        type="quiz",
+        correct_option_id=question["correct_option_id"],
+        is_anonymous=False
+    )
 
     # Increment the count of quizzes sent today
     quizzes_sent_collection.update_one(
@@ -194,6 +195,9 @@ except BadRequest as e:
         }
     except Exception as retry_error:
         logger.error(f"Retry failed for chat {chat_id}: {retry_error}")
+    
+
+
         
 @retry_on_failure
 def send_quiz_immediately(context: CallbackContext, chat_id: int):
