@@ -22,12 +22,15 @@ def upload_quizzes(directory):
                 quizzes = json.load(file)
                 if isinstance(quizzes, list):  # Ensure quizzes is a list
                     for quiz in quizzes:
-                        quiz['category'] = category  # Add category to each quiz
-                        quizzes_collection.update_one(
-                            {"question": quiz["question"], "category": category},
-                            {"$set": quiz},
-                            upsert=True
-                        )
+                        if "question" in quiz:  # Check if 'question' key exists
+                            quiz['category'] = category  # Add category to each quiz
+                            quizzes_collection.update_one(
+                                {"question": quiz["question"], "category": category},
+                                {"$set": quiz},
+                                upsert=True
+                            )
+                        else:
+                            print(f"Skipped quiz in file '{filename}' because it lacks a 'question' key: {quiz}")
                     print(f"Uploaded {len(quizzes)} quizzes for category '{category}'")
                 else:
                     print(f"Invalid format in file: {filename}")
