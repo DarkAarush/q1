@@ -65,7 +65,7 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
     """
     chat_data = load_chat_data(chat_id)
 
-    category = chat_data.get('category', 'general')  # Default category if not set
+    category = chat_data.get('category')  # Default category if not set
     questions = load_quizzes(category)
 
     if not questions:
