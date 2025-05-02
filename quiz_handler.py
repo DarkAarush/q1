@@ -71,12 +71,12 @@ def add_to_ignored_chats(chat_id):
     """
     db["ignored_chats"].update_one({"chat_id": chat_id}, {"$set": {"ignored": True}}, upsert=True)
 
+
 @retry_on_failure
 def send_quiz_logic(context: CallbackContext, chat_id: int):
     """
     Core logic for sending a quiz to the chat.
     """
-    # Check if the chat should be ignored
     if should_ignore_chat(chat_id):
         return  # Avoid sending quizzes to ignored chats
 
@@ -96,11 +96,10 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
 
     daily_limit = get_daily_quiz_limit()
 
-    # If the daily limit is reached, notify the user once, then ignore the chat
+    # If the daily limit is reached, always send the message
     if quizzes_sent["count"] >= daily_limit:
         context.bot.send_message(chat_id=chat_id, text="Daily quiz limit reached. Tomorrow you will receive new quizzes.")
-        add_to_ignored_chats(chat_id)  # Add the chat to the ignored list
-        return
+        return  # Stop further processing
 
     # Continue with quiz selection and sending logic
     used_question_ids = used_quizzes_collection.find_one({"chat_id": chat_id})
