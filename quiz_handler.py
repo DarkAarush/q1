@@ -99,13 +99,18 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
         context.bot.send_message(chat_id=chat_id, text="No questions available for this category.")
         return
 
+    # Get the chat type and daily quiz limit
+    chat_type = context.bot.get_chat(chat_id).type  # Get chat type (private, group, or supergroup)
+    logger.info(f"Chat ID: {chat_id} | Chat Type: {chat_type}")
+
     today = datetime.now().date().isoformat()
     quizzes_sent = quizzes_sent_collection.find_one({"chat_id": chat_id, "date": today})
     if not quizzes_sent:
         quizzes_sent_collection.insert_one({"chat_id": chat_id, "date": today, "count": 0})
         quizzes_sent = {"count": 0}
 
-    daily_limit = get_daily_quiz_limit()
+    daily_limit = get_daily_quiz_limit(chat_type)  # Pass chat_type to get_daily_quiz_limit
+    logger.info(f"Daily quiz limit for chat type '{chat_type}': {daily_limit}")
 
     # If the daily limit is reached, notify the user once, then ignore the chat
     if quizzes_sent["count"] >= daily_limit:
@@ -131,47 +136,9 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
         {"$push": {"used_questions": question["_id"]}},
         upsert=True
     )
-    try:
-        message = context.bot.send_poll(
-            chat_id=chat_id,
-            question=question["question"],
-            options=question["options"],
-            type="quiz",
-            correct_option_id=question["correct_option_id"],
-            is_anonymous=False
-            )
-
-    # Increment the count of quizzes sent today
-        quizzes_sent_collection.update_one(
-            {"chat_id": chat_id, "date": today},
-            {"$inc": {"count": 1}}
-            )
-
-    # Store the poll ID to handle answers
-    
-        context.bot_data[message.poll.id] = {
-            "chat_id": chat_id,
-            "correct_option_id": question["correct_option_id"]
-            }
-    except BadRequest as e:
-        logger.error(f"Failed to send quiz to chat {chat_id}: {e}")
-
-    # Retry sending any available quiz directly
-    available_questions = [q for q in questions if q["_id"] not in used_question_ids]
-    if not available_questions:
-        context.bot.send_message(chat_id=chat_id, text="No more quizzes are available.")
-        return
-
-    # Select another random question
-    question = random.choice(available_questions)
-    used_quizzes_collection.update_one(
-        {"chat_id": chat_id},
-        {"$push": {"used_questions": question["_id"]}},
-        upsert=True
-    )
 
     try:
-        # Attempt to send the new quiz as a poll
+        # Send the quiz as a poll
         message = context.bot.send_poll(
             chat_id=chat_id,
             question=question["question"],
@@ -192,8 +159,47 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
             "chat_id": chat_id,
             "correct_option_id": question["correct_option_id"]
         }
-    except Exception as retry_error:
-        logger.error(f"Retry failed for chat {chat_id}: {retry_error}")
+    except BadRequest as e:
+        logger.error(f"Failed to send quiz to chat {chat_id}: {e}")
+
+        # Retry sending any available quiz directly
+        available_questions = [q for q in questions if q["_id"] not in used_question_ids]
+        if not available_questions:
+            context.bot.send_message(chat_id=chat_id, text="No more quizzes are available.")
+            return
+
+        # Select another random question
+        question = random.choice(available_questions)
+        used_quizzes_collection.update_one(
+            {"chat_id": chat_id},
+            {"$push": {"used_questions": question["_id"]}},
+            upsert=True
+        )
+
+        try:
+            # Attempt to send the new quiz as a poll
+            message = context.bot.send_poll(
+                chat_id=chat_id,
+                question=question["question"],
+                options=question["options"],
+                type="quiz",
+                correct_option_id=question["correct_option_id"],
+                is_anonymous=False
+            )
+
+            # Increment the count of quizzes sent today
+            quizzes_sent_collection.update_one(
+                {"chat_id": chat_id, "date": today},
+                {"$inc": {"count": 1}}
+            )
+
+            # Store the poll ID to handle answers
+            context.bot_data[message.poll.id] = {
+                "chat_id": chat_id,
+                "correct_option_id": question["correct_option_id"]
+            }
+        except Exception as retry_error:
+            logger.error(f"Retry failed for chat {chat_id}: {retry_error}")
     
 
 
