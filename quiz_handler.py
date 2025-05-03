@@ -125,6 +125,8 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
         context.bot.send_message(chat_id=chat_id, text="Daily quiz limit reached. No quizzes will be sent until tomorrow.")
         quizzes_sent_collection.update_one({"chat_id": chat_id}, {"$set": {"active": False}})
         return
+    # Get the anonymous preference
+    is_anonymous = chat_data.get("is_anonymous", False)  # Default to False if not set
 
     # Continue with quiz selection and sending logic
     used_question_ids = used_quizzes_collection.find_one({"chat_id": chat_id})
@@ -146,7 +148,6 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
     )
 
     # Get the anonymous preference
-    is_anonymous = chat_data.get("is_anonymous", False)  # Default to False if not set
 
     try:
         # Send the quiz as a poll
@@ -186,8 +187,6 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
             {"$push": {"used_questions": question["_id"]}},
             upsert=True
         )
-        
-        is_anonymous = chat_data.get("is_anonymous", False)  # Default to False if not set
         
         try:
             # Attempt to send the new quiz as a poll
