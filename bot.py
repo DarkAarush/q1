@@ -93,8 +93,6 @@ def set_anonymous(update: Update, context: CallbackContext):
     Command to set whether quizzes should be anonymous.
     Displays two inline buttons: Yes (anonymous) and No (non-anonymous).
     """
-    chat_id = str(update.effective_chat.id)
-
     # Create inline buttons
     keyboard = [
         [
@@ -592,6 +590,7 @@ def main():
     dp.add_handler(CommandHandler("resume", resume_quiz))
     dp.add_handler(CommandHandler("next", next_quiz))
     dp.add_handler(CallbackQueryHandler(button))
+    # Add handlers
     dp.add_handler(CommandHandler("setanonymous", set_anonymous))  # Command to set anonymous preference
     dp.add_handler(CallbackQueryHandler(handle_anonymous_selection, pattern="^set_anonymous_"))  # Handle button clicks
     dp.add_handler(PollAnswerHandler(handle_poll_answer))
