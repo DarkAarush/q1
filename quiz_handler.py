@@ -170,7 +170,7 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
             "chat_id": chat_id,
             "correct_option_id": question["correct_option_id"]
         }
-    except BadRequest as e:
+    except Exception as e:
         logger.error(f"Failed to send quiz to chat {chat_id}: {e}")
         
         # Retry sending any available quiz directly
