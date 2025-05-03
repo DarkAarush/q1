@@ -68,18 +68,11 @@ def send_quiz(context: CallbackContext):
     chat_id = context.job.context['chat_id']
     send_quiz_logic(context, chat_id)
 
-def should_ignore_chat(chat_id):
-    """
-    Check if a chat should be ignored.
-    """
-    ignored_chat = db["ignored_chats"].find_one({"chat_id": chat_id})
-    return ignored_chat is not None
 
-def add_to_ignored_chats(chat_id):
-    """
-    Add a chat to the ignored chats collection.
-    """
-    db["ignored_chats"].update_one({"chat_id": chat_id}, {"$set": {"ignored": True}}, upsert=True)
+def should_ignore_chat(chat_id):
+    """Check if a chat is inactive due to exceeding the daily limit."""
+    chat_status = quizzes_sent_collection.find_one({"chat_id": chat_id})
+    return chat_status and not chat_status.get("active", True)
 
 
 @retry_on_failure
@@ -87,6 +80,10 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
     """
     Core logic for sending a quiz to the chat.
     """
+    # Check if the chat is inactive
+    if should_ignore_chat(chat_id):
+        logger.info(f"Skipping chat {chat_id} as it has reached its daily quiz limit.")
+        return
 
     # Check if the bot is still a member of the chat
     try:
@@ -95,10 +92,6 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
         logger.warning(f"Bot is no longer a member of chat {chat_id}. Removing chat from active list. Error: {e}")
         db["quizzes_sent"].update_one({"chat_id": chat_id}, {"$set": {"active": False}})
         return  # Skip further processing for this chat
-
-    # Check if the chat should be ignored for the day
-    if should_ignore_chat(chat_id):
-        return  # Avoid sending quizzes to ignored chats
 
     chat_data = load_chat_data(chat_id)
     category = chat_data.get('category')  # Default category if not set
@@ -112,21 +105,41 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
     chat_type = context.bot.get_chat(chat_id).type  # Get chat type (private, group, or supergroup)
     logger.info(f"Chat ID: {chat_id} | Chat Type: {chat_type}")
 
+    
+    # Check daily quiz limit
     today = datetime.now().date().isoformat()
     quizzes_sent = quizzes_sent_collection.find_one({"chat_id": chat_id, "date": today})
     if not quizzes_sent:
-        quizzes_sent_collection.insert_one({"chat_id": chat_id, "date": today, "count": 0, "active": True})
+        quizzes_sent_collection.update_one(
+            {"chat_id": chat_id},
+            {"$set": {"count": 0, "date": today, "active": True}},
+            upsert=True
+        )
         quizzes_sent = {"count": 0, "active": True}
 
-    daily_limit = get_daily_quiz_limit(chat_type)  # Pass chat_type to get_daily_quiz_limit
-    logger.info(f"Daily quiz limit for chat type '{chat_type}': {daily_limit}")
-
-    # If the daily limit is reached, deactivate the chat for the day
+    daily_limit = get_daily_quiz_limit(context.bot.get_chat(chat_id).type)
     if quizzes_sent["count"] >= daily_limit:
-        context.bot.send_message(chat_id=chat_id, text="Daily quiz limit reached. No quizzes will be sent until tomorrow.")
+        context.bot.send_message(chat_id=chat_id, text="Daily quiz limit reached. Activity will resume tomorrow.")
         quizzes_sent_collection.update_one({"chat_id": chat_id}, {"$set": {"active": False}})
         return
 
+
+    # today = datetime.now().date().isoformat()
+    # quizzes_sent = quizzes_sent_collection.find_one({"chat_id": chat_id, "date": today})
+    # if not quizzes_sent:
+    #     quizzes_sent_collection.insert_one({"chat_id": chat_id, "date": today, "count": 0, "active": True})
+    #     quizzes_sent = {"count": 0, "active": True}
+
+    # daily_limit = get_daily_quiz_limit(chat_type)  # Pass chat_type to get_daily_quiz_limit
+    # logger.info(f"Daily quiz limit for chat type '{chat_type}': {daily_limit}")
+
+    # # If the daily limit is reached, deactivate the chat for the day
+    # if quizzes_sent["count"] >= daily_limit:
+    #     context.bot.send_message(chat_id=chat_id, text="Daily quiz limit reached. No quizzes will be sent until tomorrow.")
+    #     quizzes_sent_collection.update_one({"chat_id": chat_id}, {"$set": {"active": False}})
+    #     return
+
+    
     # Continue with quiz selection and sending logic
     used_question_ids = used_quizzes_collection.find_one({"chat_id": chat_id})
     used_question_ids = used_question_ids["used_questions"] if used_question_ids else []
