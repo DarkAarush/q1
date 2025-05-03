@@ -146,7 +146,7 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
     )
 
     # Get the anonymous preference
-    is_anonymous = chat_data.get("is_anonymous", False)  # Default to False if not set
+    is_anonymous = chat_data.get("is_anonymous")  # Default to False if not set
 
     try:
         # Send the quiz as a poll
