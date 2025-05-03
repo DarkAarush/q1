@@ -560,7 +560,7 @@ def main():
     
     updater.start_polling()
     updater.job_queue.run_once(restart_active_quizzes, 0)
-    updater.job_queue.run_daily(reset_ignored_chats, time=time(0, 0))
+    updater.job_queue.run_daily(reset_active_chats, time=time(0, 0))
 
     updater.idle()
 
