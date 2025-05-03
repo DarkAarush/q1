@@ -87,7 +87,15 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
     """
     Core logic for sending a quiz to the chat.
     """
-    # Check if the chat should be ignored
+    # Check if the bot is still a member of the chat
+    try:
+        context.bot.get_chat_member(chat_id, context.bot.id)
+    except TelegramError as e:
+        logger.warning(f"Bot is no longer a member of chat {chat_id}. Removing chat from active list. Error: {e}")
+        db["quizzes_sent"].update_one({"chat_id": chat_id}, {"$set": {"active": False}})
+        return  # Skip further processing for this chat
+
+    # Check if the chat should be ignored for the day
     if should_ignore_chat(chat_id):
         return  # Avoid sending quizzes to ignored chats
 
@@ -106,16 +114,16 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
     today = datetime.now().date().isoformat()
     quizzes_sent = quizzes_sent_collection.find_one({"chat_id": chat_id, "date": today})
     if not quizzes_sent:
-        quizzes_sent_collection.insert_one({"chat_id": chat_id, "date": today, "count": 0})
-        quizzes_sent = {"count": 0}
+        quizzes_sent_collection.insert_one({"chat_id": chat_id, "date": today, "count": 0, "active": True})
+        quizzes_sent = {"count": 0, "active": True}
 
     daily_limit = get_daily_quiz_limit(chat_type)  # Pass chat_type to get_daily_quiz_limit
     logger.info(f"Daily quiz limit for chat type '{chat_type}': {daily_limit}")
 
-    # If the daily limit is reached, notify the user once, then ignore the chat
+    # If the daily limit is reached, deactivate the chat for the day
     if quizzes_sent["count"] >= daily_limit:
-        context.bot.send_message(chat_id=chat_id, text="Daily quiz limit reached. Tomorrow you will receive new quizzes.")
-        add_to_ignored_chats(chat_id)  # Add the chat to the ignored list
+        context.bot.send_message(chat_id=chat_id, text="Daily quiz limit reached. No quizzes will be sent until tomorrow.")
+        quizzes_sent_collection.update_one({"chat_id": chat_id}, {"$set": {"active": False}})
         return
 
     # Continue with quiz selection and sending logic
@@ -161,7 +169,7 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
         }
     except BadRequest as e:
         logger.error(f"Failed to send quiz to chat {chat_id}: {e}")
-
+        
         # Retry sending any available quiz directly
         available_questions = [q for q in questions if q["_id"] not in used_question_ids]
         if not available_questions:
@@ -200,7 +208,6 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
             }
         except Exception as retry_error:
             logger.error(f"Retry failed for chat {chat_id}: {retry_error}")
-    
 
 
         
