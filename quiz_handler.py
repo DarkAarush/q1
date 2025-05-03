@@ -87,6 +87,9 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
     """
     Core logic for sending a quiz to the chat.
     """
+    chat_data = load_chat_data(chat_id)
+    is_anonymous = chat_data.get("is_anonymous", False)
+
     # Check if the bot is still a member of the chat
     try:
         context.bot.get_chat_member(chat_id, context.bot.id)
@@ -126,7 +129,7 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
         quizzes_sent_collection.update_one({"chat_id": chat_id}, {"$set": {"active": False}})
         return
     # Get the anonymous preference
-    is_anonymous = chat_data.get("is_anonymous", False)  # Default to False if not set
+    # is_anonymous = chat_data.get("is_anonymous", False)  # Default to False if not set
 
     # Continue with quiz selection and sending logic
     used_question_ids = used_quizzes_collection.find_one({"chat_id": chat_id})
