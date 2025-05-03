@@ -146,6 +146,13 @@ def handle_anonymous_selection(update: Update, context: CallbackContext):
     # Send an additional confirmation message
     context.bot.send_message(chat_id=chat_id, text=confirmation_message)
 
+    # Send a confirmation message with additional details
+    context.bot.send_message(
+        chat_id=chat_id,
+        text=f"Thank you! You have chosen to make quizzes {preference}. If you want to change this setting, you can run /setanonymous again."
+    )
+
+
 def save_chat_data(chat_id, data):
     """
     Save chat data to MongoDB.
