@@ -145,6 +145,9 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
         upsert=True
     )
 
+    # Get the anonymous preference
+    is_anonymous = chat_data.get("is_anonymous", False)  # Default to False if not set
+
     try:
         # Send the quiz as a poll
         message = context.bot.send_poll(
@@ -153,7 +156,7 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
             options=question["options"],
             type="quiz",
             correct_option_id=question["correct_option_id"],
-            is_anonymous=False
+            is_anonymous=is_anonymous  # Use the preference
         )
 
         # Increment the count of quizzes sent today
@@ -183,7 +186,9 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
             {"$push": {"used_questions": question["_id"]}},
             upsert=True
         )
-
+        
+        is_anonymous = chat_data.get("is_anonymous", False)  # Default to False if not set
+        
         try:
             # Attempt to send the new quiz as a poll
             message = context.bot.send_poll(
@@ -192,7 +197,7 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
                 options=question["options"],
                 type="quiz",
                 correct_option_id=question["correct_option_id"],
-                is_anonymous=False
+                is_anonymous=is_anonymous
             )
 
             # Increment the count of quizzes sent today
