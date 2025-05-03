@@ -87,53 +87,62 @@ def start_command(update: Update, context: CallbackContext):
 def is_user_admin(update: Update, user_id: int):
     chat_member = update.effective_chat.get_member(user_id)
     return chat_member.status in [ChatMember.ADMINISTRATOR, ChatMember.CREATOR]
-
+# Function to handle the /setanonymous command
 def set_anonymous(update: Update, context: CallbackContext):
     """
-    Command to set whether quizzes should be anonymous.
-    Displays two inline buttons: Yes (anonymous) and No (non-anonymous).
+    Sends a message with inline buttons to set the anonymous quiz preference.
     """
-    # Create inline buttons
     keyboard = [
         [
-            InlineKeyboardButton("Yes", callback_data="set_anonymous_true"),
-            InlineKeyboardButton("No", callback_data="set_anonymous_false")
+            InlineKeyboardButton("Yes", callback_data="anonymous_true"),
+            InlineKeyboardButton("No", callback_data="anonymous_false")
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    # Send message with inline buttons
+    # Send the initial message with inline buttons
     update.message.reply_text(
         "Do you want quizzes to be anonymous?",
         reply_markup=reply_markup
     )
 
+# Function to handle button clicks
 def handle_anonymous_selection(update: Update, context: CallbackContext):
     """
-    Handle the user's selection for anonymous quizzes (Yes/No).
+    Handles the user's selection from the inline buttons.
     """
     query = update.callback_query
-    chat_id = str(query.message.chat.id)
+    query.answer()  # Acknowledge the query to remove the loading state
 
-    # Determine the user's selection
-    if query.data == "set_anonymous_true":
+    # Extract the selected preference from the callback data
+    chat_id = query.message.chat_id
+    data = query.data
+
+    if data == "anonymous_true":
         is_anonymous = True
-        preference = "anonymous"
-    elif query.data == "set_anonymous_false":
+    elif data == "anonymous_false":
         is_anonymous = False
-        preference = "non-anonymous"
     else:
-        query.answer("Invalid selection.")
+        query.edit_message_text("Invalid selection. Please try again.")
+        logger.error(f"Invalid callback data: {data}")
         return
 
-    # Update the chat data with the user's preference
-    chat_data = load_chat_data(chat_id)
-    chat_data["is_anonymous"] = is_anonymous
-    save_chat_data(chat_id, chat_data)
+    # Save the preference in chat data (mock database function)
+    save_chat_preference(chat_id, is_anonymous)
 
-    # Confirm the change to the user
-    query.edit_message_text(f"Quiz preference set to {preference}.")
-    query.answer("Preference updated!")
+    # Confirm the selection to the user
+    preference = "anonymous" if is_anonymous else "non-anonymous"
+    query.edit_message_text(f"Your preference has been set to {preference}.")
+    logger.info(f"User in chat {chat_id} set anonymous preference to {preference}.")
+
+# Mock function to save chat preference (replace with real database logic)
+def save_chat_preference(chat_id, is_anonymous):
+    """
+    Save the anonymous preference for the chat.
+    """
+    # In a real implementation, save this to a database
+    logger.info(f"Saving preference for chat {chat_id}: is_anonymous={is_anonymous}")
+
 
 
 def button(update: Update, context: CallbackContext):
@@ -590,9 +599,8 @@ def main():
     dp.add_handler(CommandHandler("resume", resume_quiz))
     dp.add_handler(CommandHandler("next", next_quiz))
     dp.add_handler(CallbackQueryHandler(button))
-    # Add handlers
-    dp.add_handler(CommandHandler("setanonymous", set_anonymous))  # Command to set anonymous preference
-    dp.add_handler(CallbackQueryHandler(handle_anonymous_selection, pattern="^set_anonymous_"))  # Handle button clicks
+    dp.add_handler(CommandHandler("setanonymous", set_anonymous))
+    dp.add_handler(CallbackQueryHandler(handle_anonymous_selection, pattern="^anonymous_"))
     dp.add_handler(PollAnswerHandler(handle_poll_answer))
     dp.add_handler(CommandHandler("leaderboard", show_leaderboard))
     dp.add_handler(CommandHandler("broadcast", broadcast))
