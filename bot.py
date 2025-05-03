@@ -364,19 +364,48 @@ def stop_quiz(update: Update, context: CallbackContext):
         update.message.reply_text("Quiz stopped successfully.")
     else:
         update.message.reply_text("No active quiz to stop.")
-def reset_ignored_chats(context):
-    """
-    Reset the ignored chats list to allow quizzes for all chats.
-    """
-    db["ignored_chats"].delete_many({})  # Clear the ignored chats collection
-    print("Ignored chats have been reset.")
 
-# # Schedule the job to run daily at midnight
-# job_queue.run_daily(reset_ignored_chats, time=time(0, 0))
 
-# # Start the bot
-# updater.start_polling()
-# updater.idle()
+def reset_ignored_chats(context: CallbackContext):
+    """
+    Reset the ignored chats list to allow quizzes for all chats and automatically reactivate deactivated ones.
+    """
+    # Clear the ignored chats collection
+    db["ignored_chats"].delete_many({})
+    logger.info("Ignored chats have been reset.")
+
+    # Reactivate chats for the new day
+    chats_to_reactivate = db["quizzes_sent"].find({"active": False})  # Find deactivated chats
+    for chat in chats_to_reactivate:
+        chat_id = chat["chat_id"]
+
+        # Check if the bot is still a member of the chat
+        try:
+            context.bot.get_chat_member(chat_id, context.bot.id)
+        except TelegramError as e:
+            logger.warning(f"Bot is no longer a member of chat {chat_id}. Removing from active list. Error: {e}")
+            db["quizzes_sent"].update_one({"chat_id": chat_id}, {"$set": {"active": False}})
+            continue  # Skip this chat
+
+        logger.info(f"Reactivating chat {chat_id} for the new day.")
+        db["quizzes_sent"].update_one(
+            {"chat_id": chat_id},
+            {"$set": {"count": 0, "date": datetime.now().date().isoformat(), "active": True}}
+        )
+
+        # Load chat data and schedule quizzes if the chat is active
+        chat_data = load_chat_data(chat_id)
+        if chat_data.get("active", False):
+            interval = chat_data.get("interval", 30)  # Default interval is 30 seconds
+            context.job_queue.run_repeating(
+                send_quiz,
+                interval=interval,
+                first=0,
+                context={"chat_id": chat_id, "used_questions": chat_data.get("used_questions", [])}
+            )
+            logger.info(f"Quiz resumed for chat {chat_id} with interval {interval} seconds.")
+
+
 
 
 def pause_quiz(update: Update, context: CallbackContext):
