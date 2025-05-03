@@ -69,10 +69,6 @@ def send_quiz(context: CallbackContext):
     send_quiz_logic(context, chat_id)
 
 
-def should_ignore_chat(chat_id):
-    """Check if a chat is inactive due to exceeding the daily limit."""
-    chat_status = quizzes_sent_collection.find_one({"chat_id": chat_id})
-    return chat_status and not chat_status.get("active", True)
 
 
 @retry_on_failure
@@ -80,11 +76,6 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
     """
     Core logic for sending a quiz to the chat.
     """
-    # Check if the chat is inactive
-    if should_ignore_chat(chat_id):
-        logger.info(f"Skipping chat {chat_id} as it has reached its daily quiz limit.")
-        return
-
     # Check if the bot is still a member of the chat
     try:
         context.bot.get_chat_member(chat_id, context.bot.id)
