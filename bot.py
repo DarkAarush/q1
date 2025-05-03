@@ -88,47 +88,6 @@ def start_command(update: Update, context: CallbackContext):
 def is_user_admin(update: Update, user_id: int):
     chat_member = update.effective_chat.get_member(user_id)
     return chat_member.status in [ChatMember.ADMINISTRATOR, ChatMember.CREATOR]
-# Function to handle the /setanonymous command
-
-
-def set_anonymous_command(update: Update, context: CallbackContext):
-    """
-    Handle the /setanonymous command to set the anonymous quiz preference.
-    Usage: /setanonymous <true|false>
-    """
-    chat_id = update.effective_chat.id
-
-    # Validate arguments
-    if not context.args or context.args[0].lower() not in ["true", "false"]:
-        update.message.reply_text(
-            "Usage: /setanonymous <true|false>\n"
-            "Example: /setanonymous true"
-        )
-        return
-
-    # Parse the argument
-    is_anonymous = context.args[0].lower() == "true"
-
-    # Save the preference to the database
-    save_chat_data(chat_id, {"is_anonymous": is_anonymous})
-    logger.info(f"Saved anonymous preference for chat {chat_id}: {is_anonymous}")
-
-    # Send confirmation message
-    preference = "anonymous" if is_anonymous else "non-anonymous"
-    update.message.reply_text(
-        f"Your preference has been set. The quiz will now be {preference}."
-    )
-
-def save_chat_data(chat_id, data):
-    """
-    Save chat data to MongoDB.
-    """
-    chat_data_collection.update_one(
-        {"chat_id": chat_id},
-        {"$set": {"data": data}},
-        upsert=True
-    )
-    logger.info(f"Chat data saved for chat ID {chat_id}")
 
 def button(update: Update, context: CallbackContext):
     chat_id = str(update.effective_chat.id)
