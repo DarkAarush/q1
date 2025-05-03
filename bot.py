@@ -90,68 +90,34 @@ def is_user_admin(update: Update, user_id: int):
     return chat_member.status in [ChatMember.ADMINISTRATOR, ChatMember.CREATOR]
 # Function to handle the /setanonymous command
 
-def set_anonymous(update: Update, context: CallbackContext):
+
+def set_anonymous_command(update: Update, context: CallbackContext):
     """
-    Sends a message with inline buttons to set the anonymous quiz preference.
+    Handle the /setanonymous command to set the anonymous quiz preference.
+    Usage: /setanonymous <true|false>
     """
     chat_id = update.effective_chat.id
-    logger.info(f"Sending /setanonymous inline buttons to chat: {chat_id}")
 
-    # Inline buttons for Yes/No
-    keyboard = [
-        [
-            InlineKeyboardButton("Yes", callback_data="anonymous_true"),
-            InlineKeyboardButton("No", callback_data="anonymous_false")
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    # Send the message with inline buttons
-    update.message.reply_text(
-        "Do you want quizzes to be anonymous?",
-        reply_markup=reply_markup
-    )
-
-def handle_anonymous_selection(update: Update, context: CallbackContext):
-    """
-    Handles button clicks for the /setanonymous command.
-    """
-    query = update.callback_query
-    query.answer()  # Acknowledge the callback query
-
-    chat_id = query.message.chat_id
-    data = query.data
-
-    # Determine the user's preference
-    if data == "anonymous_true":
-        is_anonymous = True
-        preference = "anonymous"
-        confirmation_message = "The quiz will now be anonymous."
-    elif data == "anonymous_false":
-        is_anonymous = False
-        preference = "non-anonymous"
-        confirmation_message = "The quiz will now not be anonymous."
-    else:
-        query.edit_message_text("Invalid selection. Please try again.")
-        logger.error(f"Invalid callback data: {data}")
+    # Validate arguments
+    if not context.args or context.args[0].lower() not in ["true", "false"]:
+        update.message.reply_text(
+            "Usage: /setanonymous <true|false>\n"
+            "Example: /setanonymous true"
+        )
         return
+
+    # Parse the argument
+    is_anonymous = context.args[0].lower() == "true"
 
     # Save the preference to the database
     save_chat_data(chat_id, {"is_anonymous": is_anonymous})
     logger.info(f"Saved anonymous preference for chat {chat_id}: {is_anonymous}")
 
-    # Confirm the selection to the user in the edited message
-    query.edit_message_text(f"Your preference has been set to {preference}.")
-    
-    # Send an additional confirmation message
-    context.bot.send_message(chat_id=chat_id, text=confirmation_message)
-
-    # Send a confirmation message with additional details
-    context.bot.send_message(
-        chat_id=chat_id,
-        text=f"Thank you! You have chosen to make quizzes {preference}. If you want to change this setting, you can run /setanonymous again."
+    # Send confirmation message
+    preference = "anonymous" if is_anonymous else "non-anonymous"
+    update.message.reply_text(
+        f"Your preference has been set. The quiz will now be {preference}."
     )
-
 
 def save_chat_data(chat_id, data):
     """
@@ -617,10 +583,9 @@ def main():
     dp.add_handler(CommandHandler("pause", pause_quiz))
     dp.add_handler(CommandHandler("resume", resume_quiz))
     dp.add_handler(CommandHandler("next", next_quiz))
+    dp.add_handler(CommandHandler("setanonymous", set_anonymous_command))
     dp.add_handler(CallbackQueryHandler(button))
     # Command and callback query handlers
-    dp.add_handler(CommandHandler("setanonymous", set_anonymous))
-    dp.add_handler(CallbackQueryHandler(handle_anonymous_selection, pattern="^anonymous_"))
 
     dp.add_handler(PollAnswerHandler(handle_poll_answer))
     dp.add_handler(CommandHandler("leaderboard", show_leaderboard))
