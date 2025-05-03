@@ -367,45 +367,50 @@ def stop_quiz(update: Update, context: CallbackContext):
         update.message.reply_text("No active quiz to stop.")
 
 
-def reset_ignored_chats(context: CallbackContext):
-    """
-    Reset the ignored chats list to allow quizzes for all chats and automatically reactivate deactivated ones.
-    """
-    # Clear the ignored chats collection
-    db["ignored_chats"].delete_many({})
-    logger.info("Ignored chats have been reset.")
+# def reset_ignored_chats(context: CallbackContext):
+#     """
+#     Reset the ignored chats list to allow quizzes for all chats and automatically reactivate deactivated ones.
+#     """
+#     # Clear the ignored chats collection
+#     db["ignored_chats"].delete_many({})
+#     logger.info("Ignored chats have been reset.")
 
-    # Reactivate chats for the new day
-    chats_to_reactivate = db["quizzes_sent"].find({"active": False})  # Find deactivated chats
-    for chat in chats_to_reactivate:
-        chat_id = chat["chat_id"]
+#     # Reactivate chats for the new day
+#     chats_to_reactivate = db["quizzes_sent"].find({"active": False})  # Find deactivated chats
+#     for chat in chats_to_reactivate:
+#         chat_id = chat["chat_id"]
 
-        # Check if the bot is still a member of the chat
-        try:
-            context.bot.get_chat_member(chat_id, context.bot.id)
-        except TelegramError as e:
-            logger.warning(f"Bot is no longer a member of chat {chat_id}. Removing from active list. Error: {e}")
-            db["quizzes_sent"].update_one({"chat_id": chat_id}, {"$set": {"active": False}})
-            continue  # Skip this chat
+#         # Check if the bot is still a member of the chat
+#         try:
+#             context.bot.get_chat_member(chat_id, context.bot.id)
+#         except TelegramError as e:
+#             logger.warning(f"Bot is no longer a member of chat {chat_id}. Removing from active list. Error: {e}")
+#             db["quizzes_sent"].update_one({"chat_id": chat_id}, {"$set": {"active": False}})
+#             continue  # Skip this chat
 
-        logger.info(f"Reactivating chat {chat_id} for the new day.")
-        db["quizzes_sent"].update_one(
-            {"chat_id": chat_id},
-            {"$set": {"count": 0, "date": datetime.now().date().isoformat(), "active": True}}
-        )
+#         logger.info(f"Reactivating chat {chat_id} for the new day.")
+#         db["quizzes_sent"].update_one(
+#             {"chat_id": chat_id},
+#             {"$set": {"count": 0, "date": datetime.now().date().isoformat(), "active": True}}
+#         )
 
-        # Load chat data and schedule quizzes if the chat is active
-        chat_data = load_chat_data(chat_id)
-        if chat_data.get("active", False):
-            interval = chat_data.get("interval", 30)  # Default interval is 30 seconds
-            context.job_queue.run_repeating(
-                send_quiz,
-                interval=interval,
-                first=0,
-                context={"chat_id": chat_id, "used_questions": chat_data.get("used_questions", [])}
-            )
-            logger.info(f"Quiz resumed for chat {chat_id} with interval {interval} seconds.")
+#         # Load chat data and schedule quizzes if the chat is active
+#         chat_data = load_chat_data(chat_id)
+#         if chat_data.get("active", False):
+#             interval = chat_data.get("interval", 30)  # Default interval is 30 seconds
+#             context.job_queue.run_repeating(
+#                 send_quiz,
+#                 interval=interval,
+#                 first=0,
+#                 context={"chat_id": chat_id, "used_questions": chat_data.get("used_questions", [])}
+#             )
+#             logger.info(f"Quiz resumed for chat {chat_id} with interval {interval} seconds.")
 
+
+def reset_active_chats(context: CallbackContext):
+    """Reset all inactive chats to active at midnight."""
+    db["quizzes_sent"].update_many({}, {"$set": {"active": True}})
+    logger.info("All chats have been reactivated for the new day.")
 
 
 
@@ -542,7 +547,6 @@ def main():
     dp.add_handler(CommandHandler("pause", pause_quiz))
     dp.add_handler(CommandHandler("resume", resume_quiz))
     dp.add_handler(CommandHandler("next", next_quiz))
-    dp.add_handler(CommandHandler("setanonymous", set_anonymous_command))
     dp.add_handler(CallbackQueryHandler(button))
     # Command and callback query handlers
 
