@@ -87,8 +87,6 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
     """
     Core logic for sending a quiz to the chat.
     """
-    chat_data = load_chat_data(chat_id)
-    is_anonymous = chat_data.get("is_anonymous", False)
 
     # Check if the bot is still a member of the chat
     try:
@@ -128,8 +126,6 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
         context.bot.send_message(chat_id=chat_id, text="Daily quiz limit reached. No quizzes will be sent until tomorrow.")
         quizzes_sent_collection.update_one({"chat_id": chat_id}, {"$set": {"active": False}})
         return
-    # Get the anonymous preference
-    # is_anonymous = chat_data.get("is_anonymous", False)  # Default to False if not set
 
     # Continue with quiz selection and sending logic
     used_question_ids = used_quizzes_collection.find_one({"chat_id": chat_id})
@@ -160,7 +156,7 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
             options=question["options"],
             type="quiz",
             correct_option_id=question["correct_option_id"],
-            is_anonymous=is_anonymous  # Use the preference
+            is_anonymous=True
         )
 
         # Increment the count of quizzes sent today
@@ -199,7 +195,7 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
                 options=question["options"],
                 type="quiz",
                 correct_option_id=question["correct_option_id"],
-                is_anonymous=is_anonymous
+                is_anonymous=True
             )
 
             # Increment the count of quizzes sent today
