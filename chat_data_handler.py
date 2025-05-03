@@ -14,20 +14,6 @@ served_users_collection = db["served_users"]
 
 
 
-def load_chat_data(chat_id):
-    """
-    Load chat data from MongoDB and set default values if not present.
-    """
-    chat_data = chat_data_collection.find_one({"chat_id": chat_id})
-    if not chat_data:
-        return {"is_anonymous": False}  # Default values
-
-    # Ensure the 'is_anonymous' flag is always present
-    if "is_anonymous" not in chat_data:
-        chat_data["is_anonymous"] = False
-
-    return chat_data
-
 
 # Load chat data
 def load_chat_data(chat_id=None):
