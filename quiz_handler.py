@@ -7,7 +7,7 @@ from leaderboard_handler import add_score
 from pymongo import MongoClient
 import random
 from datetime import datetime
-from telegram.error import BadRequest, TimedOut, NetworkError, RetryAfter 
+from telegram.error import BadRequest, TimedOut, NetworkError, RetryAfter, Unauthorized
 
 logger = logging.getLogger(__name__)
 
