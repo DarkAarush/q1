@@ -160,7 +160,7 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
             options=question["options"],
             type="quiz",
             correct_option_id=question["correct_option_id"],
-            is_anonymous=True
+            is_anonymous=False
         )
 
         # Increment the count of quizzes sent today
@@ -206,7 +206,7 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
                 options=question["options"],
                 type="quiz",
                 correct_option_id=question["correct_option_id"],
-                is_anonymous=True
+                is_anonymous=False
             )
 
             # Increment the count of quizzes sent today
