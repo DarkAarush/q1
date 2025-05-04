@@ -22,21 +22,21 @@ quizzes_sent_collection = db["quizzes_sent"]
 used_quizzes_collection = db["used_quizzes"]
 message_status_collection = db["message_status"]
 
-def retry_on_failure(func):
-    """Decorator to retry function on transient errors"""
-    def wrapper(*args, **kwargs):
-        retries = 3
-        while retries > 0:
-            try:
-                return func(*args, **kwargs)
-            except (TimedOut, NetworkError, RetryAfter) as e:
-                logger.warning(f"Retryable error occurred: {e}. Retrying...")
-                retries -= 1
-            except Exception as e:
-                logger.error(f"Unrecoverable error occurred: {e}")
-                break
-        logger.error(f"Function {func.__name__} failed after retries.")
-    return wrapper
+# def retry_on_failure(func):
+#     """Decorator to retry function on transient errors"""
+#     def wrapper(*args, **kwargs):
+#         retries = 3
+#         while retries > 0:
+#             try:
+#                 return func(*args, **kwargs)
+#             except (TimedOut, NetworkError, RetryAfter) as e:
+#                 logger.warning(f"Retryable error occurred: {e}. Retrying...")
+#                 retries -= 1
+#             except Exception as e:
+#                 logger.error(f"Unrecoverable error occurred: {e}")
+#                 break
+#         logger.error(f"Function {func.__name__} failed after retries.")
+#     return wrapper
 
 # def load_quizzes(category):
 #     """
