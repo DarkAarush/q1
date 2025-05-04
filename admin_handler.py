@@ -2,7 +2,7 @@ import logging
 from telegram import Update
 from telegram.ext import CallbackContext, CommandHandler
 from chat_data_handler import load_chat_data, get_served_chats, get_served_users
-from telegram.error import TimedOut, NetworkError, RetryAfter, BadRequest, Forbidden
+from telegram.error import TimedOut, NetworkError, RetryAfter, BadRequest
 
 logger = logging.getLogger(__name__)
 
