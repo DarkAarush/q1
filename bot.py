@@ -324,10 +324,6 @@ def start_quiz(update: Update, context: CallbackContext):
     quizzes_sent = quizzes_sent_collection.find_one({"chat_id": chat_id, "date": today})
 
 
-    if chat_data.get("active", False):
-        update.message.reply_text("A quiz is already running in this chat!")
-        return
-
     interval = chat_data.get("interval", 30)  # Default interval to 30 seconds if not set
     chat_data["active"] = True
     save_chat_data(chat_id, chat_data)
