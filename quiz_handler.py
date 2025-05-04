@@ -7,8 +7,8 @@ from leaderboard_handler import add_score
 from pymongo import MongoClient
 import random
 from datetime import datetime
-from telegram.error import BadRequest, TimedOut, NetworkError, RetryAfter
-from telegram.error import TelegramError
+from telegram.error import BadRequest, TimedOut, NetworkError, RetryAfter 
+
 logger = logging.getLogger(__name__)
 
 # MongoDB connection
@@ -18,9 +18,6 @@ db = client["telegram_bot"]
 quizzes_collection = db["quizzes"]
 quizzes_sent_collection = db["quizzes_sent"]
 used_quizzes_collection = db["used_quizzes"]
-message_status_collection = db["message_status"]
-
-
 
 def retry_on_failure(func):
     """Decorator to retry function on transient errors"""
@@ -72,6 +69,10 @@ def send_quiz(context: CallbackContext):
     send_quiz_logic(context, chat_id)
 
 
+def should_ignore_chat(chat_id):
+    """Check if a chat is inactive due to exceeding the daily limit."""
+    chat_status = quizzes_sent_collection.find_one({"chat_id": chat_id})
+    return chat_status and not chat_status.get("active", True)
 
 
 @retry_on_failure
@@ -79,22 +80,23 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
     """
     Core logic for sending a quiz to the chat.
     """
+    # Check if the chat is inactive
+    if should_ignore_chat(chat_id):
+        logger.info(f"Skipping chat {chat_id} as it has reached its daily quiz limit.")
+        return
+
     # Check if the bot is still a member of the chat
     try:
         context.bot.get_chat_member(chat_id, context.bot.id)
-    except TelegramError:
-        logger.warning(f"Bot is no longer a member of chat {chat_id}. Removing from active quizzes.")
-        save_chat_data(chat_id, {"active": False})  # Mark chat as inactive
-        return
-    
-    used_questions = context.job.context['used_questions']
-    chat_type = context.job.context.get('chat_type', 'private')  # Default to private if not provided
-    chat_data = load_chat_data(chat_id)
+    except TelegramError as e:
+        logger.warning(f"Bot is no longer a member of chat {chat_id}. Removing chat from active list. Error: {e}")
+        db["quizzes_sent"].update_one({"chat_id": chat_id}, {"$set": {"active": False}})
+        return  # Skip further processing for this chat
 
     chat_data = load_chat_data(chat_id)
     category = chat_data.get('category')  # Default category if not set
     questions = load_quizzes(category)
-    
+
     if not questions:
         context.bot.send_message(chat_id=chat_id, text="No questions available for this category.")
         return
@@ -103,52 +105,39 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
     chat_type = context.bot.get_chat(chat_id).type  # Get chat type (private, group, or supergroup)
     logger.info(f"Chat ID: {chat_id} | Chat Type: {chat_type}")
 
-    today = datetime.now().date().isoformat()  # Convert date to string
+    today = datetime.now().date().isoformat()
     quizzes_sent = quizzes_sent_collection.find_one({"chat_id": chat_id, "date": today})
-    message_status = message_status_collection.find_one({"chat_id": chat_id, "date": today})
+    if not quizzes_sent:
+        quizzes_sent_collection.insert_one({"chat_id": chat_id, "date": today, "count": 0, "active": True})
+        quizzes_sent = {"count": 0, "active": True}
 
-    daily_limit = get_daily_quiz_limit(chat_type)
-    if quizzes_sent is None:
-        quizzes_sent_collection.insert_one({"chat_id": chat_id, "date": today, "count": 0})  # Initialize count with 0
-        quizzes_sent = {"count": 0}  # Ensure quizzes_sent has a default structure
+    daily_limit = get_daily_quiz_limit(chat_type)  # Pass chat_type to get_daily_quiz_limit
+    logger.info(f"Daily quiz limit for chat type '{chat_type}': {daily_limit}")
 
+    # If the daily limit is reached, deactivate the chat for the day
     if quizzes_sent["count"] >= daily_limit:
-        if message_status is None or not message_status.get("limit_reached", False):
-            context.bot.send_message(chat_id=chat_id, text="Daily quiz limit reached. The next quiz will be sent tomorrow.")
-            if message_status is None:
-                message_status_collection.insert_one({"chat_id": chat_id, "date": today, "limit_reached": True})
-            else:
-                message_status_collection.update_one({"chat_id": chat_id, "date": today}, {"$set": {"limit_reached": True}})
-        next_quiz_time = datetime.combine(datetime.now() + timedelta(days=1), datetime.min.time())
-        context.job_queue.run_once(send_quiz, next_quiz_time, context=context.job.context)
+        context.bot.send_message(chat_id=chat_id, text="Daily quiz limit reached. No quizzes will be sent until tomorrow.")
+        quizzes_sent_collection.update_one({"chat_id": chat_id}, {"$set": {"active": False}})
         return
 
-    if not questions:
-        if message_status is None or not message_status.get("no_questions", False):
-            context.bot.send_message(chat_id=chat_id, text="No questions available for this category.")
-            if message_status is None:
-                message_status_collection.insert_one({"chat_id": chat_id, "date": today, "no_questions": True})
-            else:
-                message_status_collection.update_one({"chat_id": chat_id, "date": today}, {"$set": {"no_questions": True}})
-        return
-
+    # Continue with quiz selection and sending logic
     used_question_ids = used_quizzes_collection.find_one({"chat_id": chat_id})
     used_question_ids = used_question_ids["used_questions"] if used_question_ids else []
 
-    available_questions = [q for q in questions if q not in used_question_ids]
+    available_questions = [q for q in questions if q["_id"] not in used_question_ids]
     if not available_questions:
-        # Reset used questions if no new questions are available
-        used_quizzes_collection.update_one({"chat_id": chat_id}, {"$set": {"used_questions": []}})
-        used_question_ids = []
-        available_questions = questions
-        context.bot.send_message(chat_id=chat_id, text="All quizzes have been used. Restarting with all available quizzes.")
+        context.bot.send_message(chat_id=chat_id, text="All quizzes have been used. No more quizzes are available.")
+        return
 
+    # Select a random question
     question = random.choice(available_questions)
-    used_questions.append(question)
-    if used_question_ids:
-        used_quizzes_collection.update_one({"chat_id": chat_id}, {"$push": {"used_questions": question}})
-    else:
-        used_quizzes_collection.insert_one({"chat_id": chat_id, "used_questions": [question]})
+
+    # Mark the question as used
+    used_quizzes_collection.update_one(
+        {"chat_id": chat_id},
+        {"$push": {"used_questions": question["_id"]}},
+        upsert=True
+    )
 
     # Get the anonymous preference
 
@@ -160,7 +149,7 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
             options=question["options"],
             type="quiz",
             correct_option_id=question["correct_option_id"],
-            is_anonymous=False
+            is_anonymous=True
         )
 
         # Increment the count of quizzes sent today
@@ -178,25 +167,18 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
         logger.error(f"Failed to send quiz to chat {chat_id}: {e}")
         
         # Retry sending any available quiz directly
-        question = random.choice(available_questions)
-        used_questions.append(question)
-        if used_question_ids:
-            used_quizzes_collection.update_one({"chat_id": chat_id}, {"$push": {"used_questions": question}})
-        else:
-            used_quizzes_collection.insert_one({"chat_id": chat_id, "used_questions": [question]})
-            
-        # available_questions = [q for q in questions if q["_id"] not in used_question_ids]
-        # if not available_questions:
-        #     context.bot.send_message(chat_id=chat_id, text="No more quizzes are available.")
-        #     return
+        available_questions = [q for q in questions if q["_id"] not in used_question_ids]
+        if not available_questions:
+            context.bot.send_message(chat_id=chat_id, text="No more quizzes are available.")
+            return
 
-        # # Select another random question
-        # question = random.choice(available_questions)
-        # used_quizzes_collection.update_one(
-        #     {"chat_id": chat_id},
-        #     {"$push": {"used_questions": question["_id"]}},
-        #     upsert=True
-        # )
+        # Select another random question
+        question = random.choice(available_questions)
+        used_quizzes_collection.update_one(
+            {"chat_id": chat_id},
+            {"$push": {"used_questions": question["_id"]}},
+            upsert=True
+        )
         
         try:
             # Attempt to send the new quiz as a poll
@@ -206,7 +188,7 @@ def send_quiz_logic(context: CallbackContext, chat_id: int):
                 options=question["options"],
                 type="quiz",
                 correct_option_id=question["correct_option_id"],
-                is_anonymous=False
+                is_anonymous=True
             )
 
             # Increment the count of quizzes sent today
@@ -254,13 +236,3 @@ def handle_poll_answer(update: Update, context: CallbackContext):
     # Update the score only if the answer is correct
     if selected_option == correct_option_id:
         add_score(user_id, 1)
-
-def repeat_all_quizzes(update: Update, context: CallbackContext):
-    chat_id = str(update.effective_chat.id)
-    chat_data = load_chat_data(chat_id)
-    
-    # Clear the used_questions list to repeat all quizzes
-    chat_data["used_questions"] = []
-    save_chat_data(chat_id, chat_data)
-    
-    update.message.reply_text("All quizzes have been reset and can be repeated.")
