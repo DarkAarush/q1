@@ -20,6 +20,7 @@ db = client["telegram_bot"]
 quizzes_collection = db["quizzes"]
 quizzes_sent_collection = db["quizzes_sent"]
 used_quizzes_collection = db["used_quizzes"]
+message_status_collection = db["message_status"]
 
 def retry_on_failure(func):
     """Decorator to retry function on transient errors"""
