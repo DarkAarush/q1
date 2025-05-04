@@ -35,18 +35,27 @@ def retry_on_failure(func):
         logger.error(f"Function {func.__name__} failed after retries.")
     return wrapper
 
+# def load_quizzes(category):
+#     """
+#     Fetch quizzes from MongoDB based on category.
+#     :param category: Quiz category (e.g., 'science', 'math').
+#     :return: List of quizzes.
+#     """
+#     quizzes = list(quizzes_collection.find({"category": category}))
+#     if not quizzes:
+#         logger.error(f"No quizzes found for category '{category}'.")
+#     return quizzes
+
+
+
 def load_quizzes(category):
-    """
-    Fetch quizzes from MongoDB based on category.
-    :param category: Quiz category (e.g., 'science', 'math').
-    :return: List of quizzes.
-    """
-    quizzes = list(quizzes_collection.find({"category": category}))
-    if not quizzes:
-        logger.error(f"No quizzes found for category '{category}'.")
-    return quizzes
-
-
+    file_path = os.path.join('quizzes', f'{category}.json')
+    if os.path.exists(file_path):
+        with open(file_path, 'r') as f:
+            return json.load(f)
+    else:
+        logger.error(f"Quiz file for category '{category}' not found.")
+        return []
 
 def get_daily_quiz_limit(chat_type):
     """
@@ -60,7 +69,7 @@ def get_daily_quiz_limit(chat_type):
         return 10  # Daily limit for groups/supergroups
 
 
-@retry_on_failure
+
 def send_quiz(context: CallbackContext):
     chat_id = context.job.context['chat_id']
     used_questions = context.job.context['used_questions']
