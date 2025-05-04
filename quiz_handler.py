@@ -62,165 +62,122 @@ def get_daily_quiz_limit(chat_type):
 
 @retry_on_failure
 def send_quiz(context: CallbackContext):
-    """
-    Send a quiz to the chat based on the category and daily limits.
-    """
     chat_id = context.job.context['chat_id']
-    send_quiz_logic(context, chat_id)
+    used_questions = context.job.context['used_questions']
+    chat_data = load_chat_data(chat_id)
 
+    category = chat_data.get('category', 'general')  # Default category if not set
+    questions = load_quizzes(category)
 
-def should_ignore_chat(chat_id):
-    """Check if a chat is inactive due to exceeding the daily limit."""
-    chat_status = quizzes_sent_collection.find_one({"chat_id": chat_id})
-    return chat_status and not chat_status.get("active", True)
+    today = datetime.now().date().isoformat()  # Convert date to string
+    quizzes_sent = quizzes_sent_collection.find_one({"chat_id": chat_id, "date": today})
+    message_status = message_status_collection.find_one({"chat_id": chat_id, "date": today})
 
-
-@retry_on_failure
-def send_quiz_logic(context: CallbackContext, chat_id: int):
-    """
-    Core logic for sending a quiz to the chat.
-    """
-    # Check if the chat is inactive
-    if should_ignore_chat(chat_id):
-        logger.info(f"Skipping chat {chat_id} as it has reached its daily quiz limit.")
+    if quizzes_sent is None:
+        quizzes_sent_collection.insert_one({"chat_id": chat_id, "date": today, "count": 1})
+    elif quizzes_sent["count"] < 10:
+        quizzes_sent_collection.update_one({"chat_id": chat_id, "date": today}, {"$inc": {"count": 1}})
+    else:
+        if message_status is None or not message_status.get("limit_reached", False):
+            context.bot.send_message(chat_id=chat_id, text="Daily quiz limit reached. The next quiz will be sent tomorrow.")
+            if message_status is None:
+                message_status_collection.insert_one({"chat_id": chat_id, "date": today, "limit_reached": True})
+            else:
+                message_status_collection.update_one({"chat_id": chat_id, "date": today}, {"$set": {"limit_reached": True}})
+        next_quiz_time = datetime.combine(datetime.now() + timedelta(days=1), datetime.min.time())
+        context.job_queue.run_once(send_quiz, next_quiz_time, context=context.job.context)
         return
 
-    # Check if the bot is still a member of the chat
-    try:
-        context.bot.get_chat_member(chat_id, context.bot.id)
-    except TelegramError as e:
-        logger.warning(f"Bot is no longer a member of chat {chat_id}. Removing chat from active list. Error: {e}")
-        db["quizzes_sent"].update_one({"chat_id": chat_id}, {"$set": {"active": False}})
-        return  # Skip further processing for this chat
+    if not questions:
+        if message_status is None or not message_status.get("no_questions", False):
+            context.bot.send_message(chat_id=chat_id, text="No questions available for this category.")
+            if message_status is None:
+                message_status_collection.insert_one({"chat_id": chat_id, "date": today, "no_questions": True})
+            else:
+                message_status_collection.update_one({"chat_id": chat_id, "date": today}, {"$set": {"no_questions": True}})
+        return
 
+    used_question_ids = used_quizzes_collection.find_one({"chat_id": chat_id})
+    used_question_ids = used_question_ids["used_questions"] if used_question_ids else []
+
+    available_questions = [q for q in questions if q not in used_question_ids]
+    if not available_questions:
+        if message_status is None or not message_status.get("no_new_questions", False):
+            context.bot.send_message(chat_id=chat_id, text="No more new questions available.")
+            if message_status is None:
+                message_status_collection.insert_one({"chat_id": chat_id, "date": today, "no_new_questions": True})
+            else:
+                message_status_collection.update_one({"chat_id": chat_id, "date": today}, {"$set": {"no_new_questions": True}})
+        return
+
+    question = random.choice(available_questions)
+    used_questions.append(question)
+    if used_question_ids:
+        used_quizzes_collection.update_one({"chat_id": chat_id}, {"$push": {"used_questions": question}})
+    else:
+        used_quizzes_collection.insert_one({"chat_id": chat_id, "used_questions": [question]})
+
+    message = context.bot.send_poll(
+        chat_id=chat_id,
+        question=question['question'],
+        options=question['options'],
+        type='quiz',
+        correct_option_id=question['correct_option_id'],
+        is_anonymous=False
+    )
+
+    context.bot_data[message.poll.id] = {
+        'chat_id': chat_id,
+        'correct_option_id': question['correct_option_id']
+    }
+
+def send_quiz_immediately(context: CallbackContext, chat_id: str):
     chat_data = load_chat_data(chat_id)
-    category = chat_data.get('category')  # Default category if not set
+
+    category = chat_data.get('category', 'general')  # Default category if not set
     questions = load_quizzes(category)
+
+    today = datetime.now().date().isoformat()  # Convert date to string
+    quizzes_sent = quizzes_sent_collection.find_one({"chat_id": chat_id, "date": today})
+
+    if quizzes_sent is None:
+        quizzes_sent_collection.insert_one({"chat_id": chat_id, "date": today, "count": 1})
+    elif quizzes_sent["count"] < 10:
+        quizzes_sent_collection.update_one({"chat_id": chat_id, "date": today}, {"$inc": {"count": 1}})
+    else:
+        context.bot.send_message(chat_id=chat_id, text="Daily quiz limit reached. The next quiz will be sent tomorrow.")
+        return
 
     if not questions:
         context.bot.send_message(chat_id=chat_id, text="No questions available for this category.")
         return
 
-    # Get the chat type and daily quiz limit
-    chat_type = context.bot.get_chat(chat_id).type  # Get chat type (private, group, or supergroup)
-    logger.info(f"Chat ID: {chat_id} | Chat Type: {chat_type}")
-
-    today = datetime.now().date().isoformat()
-    quizzes_sent = quizzes_sent_collection.find_one({"chat_id": chat_id, "date": today})
-    if not quizzes_sent:
-        quizzes_sent_collection.insert_one({"chat_id": chat_id, "date": today, "count": 0, "active": True})
-        quizzes_sent = {"count": 0, "active": True}
-
-    daily_limit = get_daily_quiz_limit(chat_type)  # Pass chat_type to get_daily_quiz_limit
-    logger.info(f"Daily quiz limit for chat type '{chat_type}': {daily_limit}")
-
-    # If the daily limit is reached, deactivate the chat for the day
-    if quizzes_sent["count"] >= daily_limit:
-        context.bot.send_message(chat_id=chat_id, text="Daily quiz limit reached. No quizzes will be sent until tomorrow.")
-        quizzes_sent_collection.update_one({"chat_id": chat_id}, {"$set": {"active": False}})
-        return
-
-    # Continue with quiz selection and sending logic
-    used_question_ids = used_quizzes_collection.find_one({"chat_id": chat_id})
-    used_question_ids = used_question_ids["used_questions"] if used_question_ids else []
-
-    available_questions = [q for q in questions if q["_id"] not in used_question_ids]
+    used_question_ids = chat_data.get("used_questions", [])
+    available_questions = [q for q in questions if q not in used_question_ids]
     if not available_questions:
-        context.bot.send_message(chat_id=chat_id, text="All quizzes have been used. No more quizzes are available.")
+        context.bot.send_message(chat_id=chat_id, text="No more new questions available.")
         return
 
-    # Select a random question
     question = random.choice(available_questions)
+    used_question_ids.append(question)
+    chat_data["used_questions"] = used_question_ids
+    save_chat_data(chat_id, chat_data)
 
-    # Mark the question as used
-    used_quizzes_collection.update_one(
-        {"chat_id": chat_id},
-        {"$push": {"used_questions": question["_id"]}},
-        upsert=True
+    message = context.bot.send_poll(
+        chat_id=chat_id,
+        question=question['question'],
+        options=question['options'],
+        type='quiz',
+        correct_option_id=question['correct_option_id'],
+        is_anonymous=False
     )
 
-    # Get the anonymous preference
+    context.bot_data[message.poll.id] = {
+        'chat_id': chat_id,
+        'correct_option_id': question['correct_option_id']
+    }
 
-    try:
-        # Send the quiz as a poll
-        message = context.bot.send_poll(
-            chat_id=chat_id,
-            question=question["question"],
-            options=question["options"],
-            type="quiz",
-            correct_option_id=question["correct_option_id"],
-            is_anonymous=True
-        )
-
-        # Increment the count of quizzes sent today
-        quizzes_sent_collection.update_one(
-            {"chat_id": chat_id, "date": today},
-            {"$inc": {"count": 1}}
-        )
-
-        # Store the poll ID to handle answers
-        context.bot_data[message.poll.id] = {
-            "chat_id": chat_id,
-            "correct_option_id": question["correct_option_id"]
-        }
-    except Exception as e:
-        logger.error(f"Failed to send quiz to chat {chat_id}: {e}")
-        
-        # Retry sending any available quiz directly
-        available_questions = [q for q in questions if q["_id"] not in used_question_ids]
-        if not available_questions:
-            context.bot.send_message(chat_id=chat_id, text="No more quizzes are available.")
-            return
-
-        # Select another random question
-        question = random.choice(available_questions)
-        used_quizzes_collection.update_one(
-            {"chat_id": chat_id},
-            {"$push": {"used_questions": question["_id"]}},
-            upsert=True
-        )
-        
-        try:
-            # Attempt to send the new quiz as a poll
-            message = context.bot.send_poll(
-                chat_id=chat_id,
-                question=question["question"],
-                options=question["options"],
-                type="quiz",
-                correct_option_id=question["correct_option_id"],
-                is_anonymous=True
-            )
-
-            # Increment the count of quizzes sent today
-            quizzes_sent_collection.update_one(
-                {"chat_id": chat_id, "date": today},
-                {"$inc": {"count": 1}}
-            )
-
-            # Store the poll ID to handle answers
-            context.bot_data[message.poll.id] = {
-                "chat_id": chat_id,
-                "correct_option_id": question["correct_option_id"]
-            }
-        except Exception as retry_error:
-            logger.error(f"Retry failed for chat {chat_id}: {retry_error}")
-
-
-        
-@retry_on_failure
-def send_quiz_immediately(context: CallbackContext, chat_id: int):
-    """
-    Send a quiz immediately to the specified chat.
-    :param context: CallbackContext
-    :param chat_id: Chat ID where the quiz needs to be sent.
-    """
-    send_quiz_logic(context, chat_id)
-
-@retry_on_failure
 def handle_poll_answer(update: Update, context: CallbackContext):
-    """
-    Handle poll answers submitted by users.
-    """
     poll_answer = update.poll_answer
     user_id = str(poll_answer.user.id)
     selected_option = poll_answer.option_ids[0] if poll_answer.option_ids else None
@@ -233,6 +190,6 @@ def handle_poll_answer(update: Update, context: CallbackContext):
 
     correct_option_id = poll_data['correct_option_id']
 
-    # Update the score only if the answer is correct
+    # Update the score
     if selected_option == correct_option_id:
         add_score(user_id, 1)
