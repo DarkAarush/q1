@@ -8,8 +8,7 @@ from pymongo import MongoClient
 import random
 from datetime import datetime
 from telegram.error import BadRequest, TimedOut, NetworkError, RetryAfter
-from telegram import Unauthorized
-
+from telegram.error import TelegramError
 logger = logging.getLogger(__name__)
 
 # MongoDB connection
