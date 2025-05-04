@@ -323,9 +323,6 @@ def start_quiz(update: Update, context: CallbackContext):
     today = datetime.now().date().isoformat()  # Convert date to string
     quizzes_sent = quizzes_sent_collection.find_one({"chat_id": chat_id, "date": today})
 
-    if quizzes_sent and quizzes_sent.get("count", 0) >= 10:
-        update.message.reply_text("You have reached your daily limit. The next quiz will be sent tomorrow.")
-        return
 
     if chat_data.get("active", False):
         update.message.reply_text("A quiz is already running in this chat!")
