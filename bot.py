@@ -329,6 +329,13 @@ def start_quiz(update: Update, context: CallbackContext):
     save_chat_data(chat_id, chat_data)
 
     update.message.reply_text(f"Quiz started! Interval: {interval} seconds.")
+    if quiz_already_running():
+        message.reply_text("A quiz is already running in this chat!")
+        return
+
+    #message.reply_text(f"Quiz started! Interval: {interval} seconds.")
+    # continue with quiz logic
+
 
     # Send the first quiz immediately
     send_quiz_immediately(context, chat_id)
