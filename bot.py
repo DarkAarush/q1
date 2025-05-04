@@ -338,8 +338,8 @@ def start_quiz(update: Update, context: CallbackContext):
         return
 
     if chat_data.get("active", False):
-    message.reply_text("A quiz is already running in this chat!")
-    return
+        message.reply_text("A quiz is already running in this chat!")
+        return
 
     message.reply_text(f"Quiz started! Interval: {interval} seconds.")
 
