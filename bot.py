@@ -317,6 +317,7 @@ def set_interval(update: Update, context: CallbackContext):
         start_quiz(update, context)
 
 
+
 def quiz_already_running():
     # Example logic — adapt based on your real tracking method
     return chat_data.get("active", False)
@@ -326,31 +327,28 @@ def start_quiz(update: Update, context: CallbackContext):
     chat_id = str(update.effective_chat.id)
     chat_data = load_chat_data(chat_id)
 
-    today = datetime.now().date().isoformat()
+    today = datetime.now().date().isoformat()  # Convert date to string
     quizzes_sent = quizzes_sent_collection.find_one({"chat_id": chat_id, "date": today})
 
-    interval = chat_data.get("interval", 30)
-    chat_data["active"] = True
-    save_chat_data(chat_id, chat_data)
-
-    message = update.message or (update.callback_query and update.callback_query.message)
-    if message is None:
+    if quizzes_sent and quizzes_sent.get("count", 0) >= 10:
+        update.message.reply_text("You have reached your daily limit. The next quiz will be sent tomorrow.")
         return
 
     if chat_data.get("active", False):
-        message.reply_text("A quiz is already running in this chat!")
+        update.message.reply_text("A quiz is already running in this chat!")
         return
 
-    message.reply_text(f"Quiz started! Interval: {interval} seconds.")
+    interval = chat_data.get("interval", 30)  # Default interval to 30 seconds if not set
+    chat_data["active"] = True
+    save_chat_data(chat_id, chat_data)
 
+    update.message.reply_text(f"Quiz started! Interval: {interval} seconds.")
+
+    # Send the first quiz immediately
     send_quiz_immediately(context, chat_id)
-    context.job_queue.run_repeating(
-        send_quiz,
-        interval=interval,
-        first=interval,
-        context={"chat_id": chat_id, "used_questions": []}
-    )
 
+    # Schedule subsequent quizzes at the specified interval
+    context.job_queue.run_repeating(send_quiz, interval=interval, first=interval, context={"chat_id": chat_id, "used_questions": []})
 
 
 def stop_quiz(update: Update, context: CallbackContext):
