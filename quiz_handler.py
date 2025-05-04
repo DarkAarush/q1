@@ -6,6 +6,8 @@ from chat_data_handler import load_chat_data
 from leaderboard_handler import add_score
 from pymongo import MongoClient
 import random
+import json
+import os
 from datetime import datetime
 from telegram.error import BadRequest, TimedOut, NetworkError, RetryAfter 
 
