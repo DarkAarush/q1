@@ -317,6 +317,11 @@ def set_interval(update: Update, context: CallbackContext):
         start_quiz(update, context)
 
 
+def quiz_already_running():
+    # Example logic — adapt based on your real tracking method
+    return chat_data.get("active", False)
+    
+
 def start_quiz(update: Update, context: CallbackContext):
     chat_id = str(update.effective_chat.id)
     chat_data = load_chat_data(chat_id)
@@ -332,9 +337,9 @@ def start_quiz(update: Update, context: CallbackContext):
     if message is None:
         return
 
-    if quiz_already_running():
-        message.reply_text("A quiz is already running in this chat!")
-        return
+    if chat_data.get("active", False):
+    message.reply_text("A quiz is already running in this chat!")
+    return
 
     message.reply_text(f"Quiz started! Interval: {interval} seconds.")
 
