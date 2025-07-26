@@ -1,575 +1,563 @@
+#!/usr/bin/env python3
+"""
+Ludo Game Telegram Bot with Comprehensive Logging
+"""
+
+import os
+import json
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatMember
-from telegram.error import TelegramError
+import asyncio
+from datetime import datetime, timedelta
+from typing import Dict, Any, Optional
+from dataclasses import dataclass
+import uuid
+
+# Telegram Bot imports
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Updater, CommandHandler, CallbackQueryHandler, CallbackContext, PollAnswerHandler
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    ContextTypes,
+    filters
 )
-from chat_data_handler import load_chat_data, save_chat_data, add_served_chat, add_served_user, get_active_quizzes
-from quiz_handler import send_quiz, send_quiz_immediately,  handle_poll_answer, load_quizzes
-from admin_handler import broadcast
-from leaderboard_handler import get_user_score, get_top_scores
-from datetime import datetime
-from pymongo import MongoClient
-import threading
-import time
-from datetime import time
-# Enable logging
-from bot_logging import logger
 
-TOKEN = "7183336129:AAGBlp0cqb9gjIRj0CdXRhTR4-b9QMDVAaM"
-ADMIN_ID = 5050578106  # Replace with your actual Telegram user ID
-LOG_GROUP_ID = -1001902619247  # Replace with your actual log group chat ID
+# ================================
+# TELEGRAM BOT LOGGER
+# ================================
 
-# MongoDB connection
-# MONGO_URI = "mongodb+srv://asrushfig:2003@cluster0.6vdid.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
-MONGO_URI = "mongodb+srv://2004:2005@cluster0.6vdid.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+class TelegramBotLogger:
+    def __init__(self):
+        self.setup_logging()
+        self.bot_stats = {
+            'total_commands': 0,
+            'successful_commands': 0,
+            'failed_commands': 0,
+            'total_users': set(),
+            'active_games': 0,
+            'invitations_sent': 0
+        }
 
-# MONGO_URI = "mongodb+srv://tigerbundle282:tTaRXh353IOL9mj2@testcookies.2elxf.mongodb.net/?retryWrites=true&w=majority&appName=Testcookies"
-client = MongoClient(MONGO_URI)
-db = client["telegram_bot"]
-quizzes_sent_collection = db["quizzes_sent"]
-chat_data_collection = db["chat_data"]
-
-
-
-def log_user_or_group(update: Update, context: CallbackContext):
-    chat = update.effective_chat
-    user = update.effective_user
-
-    if chat.type in ['group', 'supergroup']:
-        log_message = (
-            f"Group started the bot: {chat.title}\nID: {chat.id}\n\n"
-            f"Group link: https://t.me/{chat.username if chat.username else 'N/A'}"
+    def setup_logging(self):
+        # Create logs directory
+        os.makedirs('logs', exist_ok=True)
+        
+        # Setup formatters
+        detailed_formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s'
         )
-    else:
-        log_message = (
-            f"User started the bot: {user.first_name} {user.last_name or ''}\n\n"
-            f"Username: @{user.username or 'N/A'},\nID: {user.id}\n"
-            f"User profile: https://t.me/{user.username if user.username else 'N/A'}"
+        
+        simple_formatter = logging.Formatter(
+            '%(asctime)s - %(levelname)s - %(message)s'
         )
 
-    logger.info(f"Logging message: {log_message}")
-    context.bot.send_message(chat_id=LOG_GROUP_ID, text=log_message)
+        # File handlers
+        bot_handler = logging.FileHandler('logs/telegram_bot.log')
+        bot_handler.setLevel(logging.DEBUG)
+        bot_handler.setFormatter(detailed_formatter)
 
-def start_command(update: Update, context: CallbackContext):
-    chat_id = str(update.effective_chat.id)
-    user_id = str(update.effective_user.id)
+        error_handler = logging.FileHandler('logs/bot_errors.log')
+        error_handler.setLevel(logging.ERROR)
+        error_handler.setFormatter(detailed_formatter)
 
-    # Log the user or group
-    log_user_or_group(update, context)
+        # Console handler
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(simple_formatter)
 
-    # Register the chat and user for broadcasting
-    add_served_chat(chat_id)
-    add_served_user(user_id)
+        # Setup logger
+        self.logger = logging.getLogger('TelegramBot')
+        self.logger.setLevel(logging.DEBUG)
+        self.logger.addHandler(bot_handler)
+        self.logger.addHandler(error_handler)
+        self.logger.addHandler(console_handler)
 
-    # Inline buttons for main menu
-    keyboard = [
-        [
-            InlineKeyboardButton("Add in Your Group +", url=f"https://t.me/PYQ_Quizbot?startgroup=true"),   
-        ],
-        [InlineKeyboardButton("Start PYQ Quizzes", callback_data='start_quiz')],
-        [
-            InlineKeyboardButton("📊 Leaderboard", callback_data='show_leaderboard'),
-            InlineKeyboardButton("📈 My Score", callback_data='show_stats')
-        ],
-        [InlineKeyboardButton("Commands", callback_data='show_commands')], 
-        [InlineKeyboardButton("Download all Edition Book", url=f"https://t.me/+ZSZUt_eBmmhiMDM1")]
+        self.logger.info("🤖 Telegram Bot Logger Initialized")
+
+    def log_structured(self, level: str, event_type: str, data: Dict[str, Any]):
+        """Log structured data for analytics"""
+        log_entry = {
+            'timestamp': datetime.utcnow().isoformat(),
+            'event_type': event_type,
+            'component': 'telegram-bot',
+            'data': data,
+            'stats': {
+                'total_commands': self.bot_stats['total_commands'],
+                'successful_commands': self.bot_stats['successful_commands'],
+                'failed_commands': self.bot_stats['failed_commands'],
+                'total_users': len(self.bot_stats['total_users']),
+                'active_games': self.bot_stats['active_games'],
+                'invitations_sent': self.bot_stats['invitations_sent']
+            }
+        }
         
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+        log_message = f"🤖 {event_type.upper()}: {json.dumps(log_entry, default=str)}"
+        getattr(self.logger, level.lower())(log_message)
 
-    # Send welcome message with main menu buttons
-    update.message.reply_text(
-        "*Pinnacle 7th Edition*\n\nWelcome to the Pinnacle 7th edition Quiz Bot! This is a Quiz Bot made by *Pinnacle Publication.*\n\nThis can ask two Exams PYQ's.\n\n*➠ SSC *\n*➠ RRB*\n\nChoose the option for proceed further :",
-        reply_markup=reply_markup, parse_mode="Markdown"
-    )
+    def log_command(self, update: Update, command: str, success: bool = True, additional_data: Dict = None):
+        """Log bot commands"""
+        self.bot_stats['total_commands'] += 1
+        self.bot_stats['total_users'].add(update.effective_user.id)
+        
+        if success:
+            self.bot_stats['successful_commands'] += 1
+        else:
+            self.bot_stats['failed_commands'] += 1
 
+        user_info = {
+            'user_id': update.effective_user.id,
+            'username': update.effective_user.username,
+            'first_name': update.effective_user.first_name,
+            'command': command,
+            'success': success,
+            'chat_id': update.effective_chat.id,
+            'chat_type': update.effective_chat.type,
+            'additional_data': additional_data or {}
+        }
+        
+        level = 'info' if success else 'error'
+        self.log_structured(level, 'bot_command', user_info)
 
-def is_user_admin(update: Update, user_id: int):
-    chat_member = update.effective_chat.get_member(user_id)
-    return chat_member.status in [ChatMember.ADMINISTRATOR, ChatMember.CREATOR]
+    def log_game_invitation(self, from_user_id: int, to_user_id: int, game_id: str):
+        """Log game invitations"""
+        self.bot_stats['invitations_sent'] += 1
+        
+        invitation_data = {
+            'from_user_id': from_user_id,
+            'to_user_id': to_user_id,
+            'game_id': game_id,
+            'invitation_id': str(uuid.uuid4())
+        }
+        
+        self.log_structured('info', 'game_invitation', invitation_data)
 
-def button(update: Update, context: CallbackContext):
-    chat_id = str(update.effective_chat.id)
-    query = update.callback_query
-    query.answer()
-    chat_id = str(query.message.chat.id)
-    chat_data = load_chat_data(chat_id)
+    def log_webhook_event(self, update: Update):
+        """Log webhook events"""
+        webhook_data = {
+            'update_id': update.update_id,
+            'message_type': type(update.message).__name__ if update.message else 'None',
+            'user_id': update.effective_user.id if update.effective_user else None,
+            'chat_id': update.effective_chat.id if update.effective_chat else None,
+            'has_callback_query': bool(update.callback_query)
+        }
+        
+        self.log_structured('debug', 'webhook_event', webhook_data)
 
-    if query.data == 'start_quiz':
-        # Inline buttons for language selection
-        keyboard = [
-            [
-                InlineKeyboardButton("Hindi", callback_data='language_hindi'),
-                InlineKeyboardButton("English", callback_data='language_english')
-            ]
+    def log_error(self, error: Exception, context: str, additional_data: Dict = None):
+        """Log errors with context"""
+        error_data = {
+            'error_type': type(error).__name__,
+            'error_message': str(error),
+            'context': context,
+            'additional_data': additional_data or {}
+        }
+        
+        self.log_structured('error', 'bot_error', error_data)
+        self.logger.error(f"❌ ERROR in {context}: {error}", exc_info=True)
+
+    def get_stats(self) -> Dict:
+        """Get bot statistics"""
+        return {
+            'total_commands': self.bot_stats['total_commands'],
+            'successful_commands': self.bot_stats['successful_commands'],
+            'failed_commands': self.bot_stats['failed_commands'],
+            'success_rate': (
+                self.bot_stats['successful_commands'] / max(self.bot_stats['total_commands'], 1) * 100
+            ),
+            'total_users': len(self.bot_stats['total_users']),
+            'active_games': self.bot_stats['active_games'],
+            'invitations_sent': self.bot_stats['invitations_sent']
+        }
+
+# Initialize logger
+bot_logger = TelegramBotLogger()
+
+# ================================
+# GAME DATA MODELS
+# ================================
+
+@dataclass
+class GameInvitation:
+    id: str
+    from_user_id: int
+    to_user_id: int
+    game_url: str
+    created_at: datetime
+    expires_at: datetime
+    status: str = "pending"  # pending, accepted, declined, expired
+
+@dataclass
+class UserProfile:
+    user_id: int
+    username: str
+    first_name: str
+    games_played: int = 0
+    games_won: int = 0
+    last_active: datetime = None
+    
+    def __post_init__(self):
+        if self.last_active is None:
+            self.last_active = datetime.utcnow()
+
+# ================================
+# GAME MANAGER FOR BOT
+# ================================
+
+class BotGameManager:
+    def __init__(self):
+        self.game_invitations: Dict[str, GameInvitation] = {}
+        self.user_profiles: Dict[int, UserProfile] = {}
+        self.active_games: Dict[str, Dict] = {}
+        
+    def create_game_invitation(self, from_user_id: int, to_user_id: int) -> GameInvitation:
+        """Create a new game invitation"""
+        invitation_id = str(uuid.uuid4())
+        game_url = f"https://yourdomain.com/game/{invitation_id}"  # Replace with your domain
+        
+        invitation = GameInvitation(
+            id=invitation_id,
+            from_user_id=from_user_id,
+            to_user_id=to_user_id,
+            game_url=game_url,
+            created_at=datetime.utcnow(),
+            expires_at=datetime.utcnow() + timedelta(hours=24)  # 24 hour expiry
+        )
+        
+        self.game_invitations[invitation_id] = invitation
+        bot_logger.log_game_invitation(from_user_id, to_user_id, invitation_id)
+        
+        return invitation
+    
+    def get_user_profile(self, user_id: int, username: str = None, first_name: str = None) -> UserProfile:
+        """Get or create user profile"""
+        if user_id not in self.user_profiles:
+            self.user_profiles[user_id] = UserProfile(
+                user_id=user_id,
+                username=username or "Unknown",
+                first_name=first_name or "User"
+            )
+        else:
+            # Update last active
+            self.user_profiles[user_id].last_active = datetime.utcnow()
+        
+        return self.user_profiles[user_id]
+    
+    def accept_invitation(self, invitation_id: str) -> bool:
+        """Accept game invitation"""
+        if invitation_id in self.game_invitations:
+            invitation = self.game_invitations[invitation_id]
+            if invitation.status == "pending" and datetime.utcnow() < invitation.expires_at:
+                invitation.status = "accepted"
+                return True
+        return False
+    
+    def cleanup_expired_invitations(self):
+        """Remove expired invitations"""
+        current_time = datetime.utcnow()
+        expired_ids = [
+            inv_id for inv_id, inv in self.game_invitations.items()
+            if current_time > inv.expires_at and inv.status == "pending"
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        query.edit_message_text(text="*Please select your language: [Hindi, English]*", reply_markup=reply_markup, parse_mode="Markdown")
-
-    elif query.data.startswith('language_'):
-        language = query.data.split('_')[1]
-        chat_data['language'] = language
-        save_chat_data(chat_id, chat_data)
-
-        # Inline buttons for category selection based on the chosen language
-        if language == 'hindi':
-            keyboard = [
-                [
-                    InlineKeyboardButton("SSC", callback_data='category_SSCHi'),
-                    InlineKeyboardButton("RRB", callback_data='category_RRBHi')
-                ],
-                [InlineKeyboardButton("Back", callback_data='back_to_languages')]
-            ]
-        elif language == 'english':
-            keyboard = [
-                [
-                    InlineKeyboardButton("SSC", callback_data='category_SSCEn'),
-                    InlineKeyboardButton("RRB", callback_data='category_RRBEn')
-                ],
-                [InlineKeyboardButton("Back", callback_data='back_to_languages')]
-            ]
         
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        query.edit_message_text(text=f"*Language selected: {language.upper()}\nPlease select your category: [SSC, RRB]*",
-                                reply_markup=reply_markup, parse_mode="Markdown")
+        for inv_id in expired_ids:
+            self.game_invitations[inv_id].status = "expired"
+            bot_logger.log_structured('info', 'invitation_expired', {'invitation_id': inv_id})
 
-    elif query.data.startswith('category_'):
-        category = query.data.split('_')[1]
-        chat_data['category'] = category
-        save_chat_data(chat_id, chat_data)
+# Initialize game manager
+game_manager = BotGameManager()
 
-        # Directly start the quiz with interval selection
-        keyboard = [
-            [
-                InlineKeyboardButton("30 sec", callback_data='interval_30'),
-                InlineKeyboardButton("1 min", callback_data='interval_60'),
-                InlineKeyboardButton("5 min", callback_data='interval_300')
-            ],
-            [
-                InlineKeyboardButton("10 min", callback_data='interval_600'),
-                InlineKeyboardButton("30 min", callback_data='interval_1800'),
-                InlineKeyboardButton("60 min", callback_data='interval_3600')
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        query.edit_message_text(text=f"Category selected: {category.upper()}\n*Please select the interval for quizzes: using this command /setinterval *\nSet the interval for quizzes - [Ex. /setinterval 20] for set Custom Interval",
-                                reply_markup=reply_markup, parse_mode="Markdown")
+# ================================
+# BOT COMMAND HANDLERS
+# ================================
 
-    elif query.data == 'back_to_languages':
-        # Inline buttons for language selection
-        keyboard = [
-            [
-                InlineKeyboardButton("Hindi", callback_data='language_hindi'),
-                InlineKeyboardButton("English", callback_data='language_english')
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        query.edit_message_text(text="Please select your language:", reply_markup=reply_markup)
-
-    elif query.data == 'back_to_categories':
-        language = chat_data.get('language', 'english')
-        if language == 'hindi':
-            keyboard = [
-                [
-                    InlineKeyboardButton("SSC", callback_data='category_SSCHi'),
-                    InlineKeyboardButton("RRB", callback_data='category_RRBHi')
-                ],
-                [InlineKeyboardButton("Back", callback_data='back_to_languages')]
-            ]
-        elif language == 'english':
-            keyboard = [
-                [
-                    InlineKeyboardButton("SSC", callback_data='category_SSCEn'),
-                    InlineKeyboardButton("RRB", callback_data='category_RRBEn')
-                ],
-                [InlineKeyboardButton("Back", callback_data='back_to_languages')]
-            ]
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /start command"""
+    try:
+        user = update.effective_user
+        profile = game_manager.get_user_profile(user.id, user.username, user.first_name)
         
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        query.edit_message_text(text="Please select your category:", reply_markup=reply_markup)
+        welcome_message = f"""
+🎲 **Welcome to Ludo Game, {user.first_name}!** 🎲
 
-    elif query.data.startswith('interval_'):
-        interval = int(query.data.split('_')[1])
-        chat_data = load_chat_data(chat_id)
-        chat_data["interval"] = interval
-        save_chat_data(chat_id, chat_data)
-        
-        if chat_data.get("active", False):
-            query.edit_message_text(f"Quiz interval updated to {interval} seconds. Applying new interval immediately.")
-            jobs = context.job_queue.jobs()
-            for job in jobs:
-                if job.context and job.context["chat_id"] == chat_id:
-                    job.schedule_removal()
-                    
-            # Send the first quiz immediately and then schedule subsequent quizzes
-        send_quiz_immediately(context, chat_id)
-        context.job_queue.run_repeating(send_quiz, interval=interval, first=interval, context={"chat_id": chat_id, "used_questions": chat_data.get("used_questions", [])})
-        query.edit_message_text(f"Quiz interval updated to {interval} seconds. Starting quiz.")
-        start_quiz(update, context)
+I'm your Ludo game bot! Here's what I can help you with:
 
-    elif query.data == 'show_leaderboard':
-        chat_id = update.effective_chat.id
-        # Send initial loading message
-        loading_message = context.bot.send_message(chat_id=chat_id, text="Leaderboard is loading...")
+🎮 **Commands:**
+/play - Start a new game or join existing one
+/invite @username - Invite someone to play
+/stats - View your game statistics
+/help - Show this help message
 
-        # Send loading updates in a separate thread
-        def send_loading_messages(message_id):
-            for i in range(2, 4):
-                time.sleep(1)  # Wait for 1 second before sending the next message
-                context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=f"Leaderboard is loading...{i}")
+🏆 **Your Stats:**
+• Games Played: {profile.games_played}
+• Games Won: {profile.games_won}
+• Win Rate: {(profile.games_won / max(profile.games_played, 1) * 100):.1f}%
 
-        loading_thread = threading.Thread(target=send_loading_messages, args=(loading_message.message_id,))
-        loading_thread.start()
-
-        # Fetch and display the leaderboard
-        top_scores = get_top_scores(20)
-        loading_thread.join()  # Wait for the loading messages to finish
-
-        if not top_scores:
-            context.bot.delete_message(chat_id=chat_id, message_id=loading_message.message_id)
-            update.effective_message.reply_text("🏆 No scores yet! Start playing to appear on the leaderboard.")
-            return
-
-        # Delete the loading message
-        context.bot.delete_message(chat_id=chat_id, message_id=loading_message.message_id)
-
-        # Prepare and send the leaderboard message
-        message = "🏆 *Quiz Leaderboard* 🏆\n\n"
-        medals = ["🥇", "🥈", "🥉"]
-
-        for rank, (user_id, score) in enumerate(top_scores, start=1):
-            try:
-                user = context.bot.get_chat(int(user_id))
-                username = f"@{user.username}" if user.username else f"{user.first_name} {user.last_name or ''}"
-            except Exception:
-                username = f"User {user_id}"
-
-            rank_display = medals[rank - 1] if rank <= 3 else f"{rank}."
-            message += f"{rank_display}  *{username}* - {score} Points\n\n"
-
-        update.effective_message.reply_text(message, parse_mode="Markdown")
-
-    elif query.data == 'show_stats':
-        user_id = str(update.effective_user.id)
-        score = get_user_score(user_id)
-        update.effective_message.reply_text(f"Your current score is: {score} points.")
-        
-    elif query.data == 'show_commands':
-        commands_description = """
-        /start - Start the bot and show the main menu
-        /setinterval - Set the interval for quizzes
-        /stopquiz - Stop the current quiz
-        /pause - Pause the current quiz
-        /resume - Resume a paused quiz
-        /leaderboard - Show the leaderboard
-        /stats - Show your current stats
+Ready to play? Use /play to get started!
         """
-        # Inline button to go back to the main menu
-        keyboard = [
-            [InlineKeyboardButton("Back", callback_data='back_to_main_menu')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        query.edit_message_text(text=f"Available Commands:\n{commands_description}", reply_markup=reply_markup)
-
-    elif query.data == 'back_to_main_menu':
-        # Inline buttons for main menu
-        keyboard = [
-            [InlineKeyboardButton("Start Quiz", callback_data='start_quiz')],
-            [
-                InlineKeyboardButton("Leaderboard", callback_data='show_leaderboard'),
-                InlineKeyboardButton("My Score", callback_data='show_stats')
-            ],
-            [InlineKeyboardButton("Commands", callback_data='show_commands')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        query.edit_message_text(text="Welcome to the Quiz Bot! Please choose an option:", reply_markup=reply_markup)
-
-
-def set_interval(update: Update, context: CallbackContext):
-    chat_id = str(update.effective_chat.id)
-
-    if not context.args or not context.args[0].isdigit():
-        update.message.reply_text("Usage: /setinterval <seconds>")
-        return
-    
-    interval = int(context.args[0])
-    if interval < 10:
-        update.message.reply_text("Interval must be at least 10 seconds.")
-        return
-
-    chat_data = load_chat_data(chat_id)
-    chat_data["interval"] = interval
-    save_chat_data(chat_id, chat_data)
-
-    # If quiz is already running, update the interval immediately
-    if chat_data.get("active", False):
-        update.message.reply_text(f"Quiz interval updated to {interval} seconds. Applying new interval immediately.")
-        jobs = context.job_queue.jobs()
-        for job in jobs:
-            if job.context and job.context["chat_id"] == chat_id:
-                job.schedule_removal()
-        # Send the first quiz immediately and then schedule subsequent quizzes
-        send_quiz_immediately(context, chat_id)
-        context.job_queue.run_repeating(send_quiz, interval=interval, first=interval, context={"chat_id": chat_id, "used_questions": chat_data.get("used_questions", [])})
-    else:
-        update.message.reply_text(f"Quiz interval updated to {interval} seconds.")
-        start_quiz(update, context)
-
-
-
-def quiz_already_running():
-    # Example logic — adapt based on your real tracking method
-    return chat_data.get("active", False)
-    
-
-def start_quiz(update: Update, context: CallbackContext):
-    chat_id = str(update.effective_chat.id)
-    chat_data = load_chat_data(chat_id)
-
-    today = datetime.now().date().isoformat()  # Convert date to string
-    quizzes_sent = quizzes_sent_collection.find_one({"chat_id": chat_id, "date": today})
-
-    if quizzes_sent and quizzes_sent.get("count", 0) >= 10:
-        update.message.reply_text("You have reached your daily limit. The next quiz will be sent tomorrow.")
-        return
-
-    if chat_data.get("active", False):
-        update.message.reply_text("A quiz is already running in this chat!")
-        return
-
-    interval = chat_data.get("interval", 30)  # Default interval to 30 seconds if not set
-    chat_data["active"] = True
-    save_chat_data(chat_id, chat_data)
-
-    update.message.reply_text(f"Quiz started! Interval: {interval} seconds.")
-
-    # Send the first quiz immediately
-    send_quiz_immediately(context, chat_id)
-
-    # Schedule subsequent quizzes at the specified interval
-    context.job_queue.run_repeating(send_quiz, interval=interval, first=interval, context={"chat_id": chat_id, "used_questions": []})
-
-
-def stop_quiz(update: Update, context: CallbackContext):
-    """
-    Stop the quiz job for the current chat.
-    """
-    chat_id = str(update.effective_chat.id)
-    chat_data = load_chat_data(chat_id)
-
-    # If there's active quiz data for the chat
-    if chat_data:
-        chat_data["active"] = False
-        save_chat_data(chat_id, chat_data)
-
-        # Remove the scheduled job for this chat
-        jobs = context.job_queue.jobs()
-        for job in jobs:
-            if job.context and job.context["chat_id"] == chat_id:
-                job.schedule_removal()
-
-        update.message.reply_text("Quiz stopped successfully.")
-    else:
-        update.message.reply_text("No active quiz to stop.")
-
-
-# def reset_ignored_chats(context: CallbackContext):
-#     """
-#     Reset the ignored chats list to allow quizzes for all chats and automatically reactivate deactivated ones.
-#     """
-#     # Clear the ignored chats collection
-#     db["ignored_chats"].delete_many({})
-#     logger.info("Ignored chats have been reset.")
-
-#     # Reactivate chats for the new day
-#     chats_to_reactivate = db["quizzes_sent"].find({"active": False})  # Find deactivated chats
-#     for chat in chats_to_reactivate:
-#         chat_id = chat["chat_id"]
-
-#         # Check if the bot is still a member of the chat
-#         try:
-#             context.bot.get_chat_member(chat_id, context.bot.id)
-#         except TelegramError as e:
-#             logger.warning(f"Bot is no longer a member of chat {chat_id}. Removing from active list. Error: {e}")
-#             db["quizzes_sent"].update_one({"chat_id": chat_id}, {"$set": {"active": False}})
-#             continue  # Skip this chat
-
-#         logger.info(f"Reactivating chat {chat_id} for the new day.")
-#         db["quizzes_sent"].update_one(
-#             {"chat_id": chat_id},
-#             {"$set": {"count": 0, "date": datetime.now().date().isoformat(), "active": True}}
-#         )
-
-#         # Load chat data and schedule quizzes if the chat is active
-#         chat_data = load_chat_data(chat_id)
-#         if chat_data.get("active", False):
-#             interval = chat_data.get("interval", 30)  # Default interval is 30 seconds
-#             context.job_queue.run_repeating(
-#                 send_quiz,
-#                 interval=interval,
-#                 first=0,
-#                 context={"chat_id": chat_id, "used_questions": chat_data.get("used_questions", [])}
-#             )
-#             logger.info(f"Quiz resumed for chat {chat_id} with interval {interval} seconds.")
-
-
-def reset_active_chats(context: CallbackContext):
-    """Reset all inactive chats to active at midnight."""
-    db["quizzes_sent"].update_many({}, {"$set": {"active": True}})
-    logger.info("All chats have been reactivated for the new day.")
-
-
-
-def pause_quiz(update: Update, context: CallbackContext):
-    chat_id = str(update.effective_chat.id)
-    chat_data = load_chat_data(chat_id)
-
-    if not chat_data.get("active", False):
-        update.message.reply_text("No active quiz to pause.")
-        return
-
-    chat_data["paused"] = True
-    save_chat_data(chat_id, chat_data)
-
-    jobs = context.job_queue.jobs()
-    for job in jobs:
-        if job.context and job.context["chat_id"] == chat_id:
-            job.schedule_removal()
-
-    update.message.reply_text("Quiz paused successfully.")
-
-def resume_quiz(update: Update, context: CallbackContext):
-    chat_id = str(update.effective_chat.id)
-    chat_data = load_chat_data(chat_id)
-
-    if not chat_data.get("paused", False):
-        update.message.reply_text("No paused quiz to resume.")
-        return
-
-    chat_data["paused"] = False
-    save_chat_data(chat_id, chat_data)
-
-    interval = chat_data.get("interval", 30)
-    context.job_queue.run_repeating(send_quiz, interval=interval, first=0, context={"chat_id": chat_id, "used_questions": []})
-
-    update.message.reply_text("Quiz resumed successfully.")
-    
-def restart_active_quizzes(context: CallbackContext):
-    active_quizzes = get_active_quizzes()
-    for quiz in active_quizzes:
-        chat_id = quiz["chat_id"]
-        interval = quiz["data"].get("interval", 30)
-        used_questions = quiz["data"].get("used_questions", [])
-
-        # Check if bot is still a member of the chat
-        try:
-            context.bot.get_chat_member(chat_id, context.bot.id)
-        except TelegramError:
-            logger.warning(f"Bot is no longer a member of chat {chat_id}. Removing from active quizzes.")
-            save_chat_data(chat_id, {"active": False})  # Mark chat as inactive
-            continue
-
-        logger.info(f"Restarting quiz for chat_id: {chat_id} with interval {interval} seconds.")
-        context.job_queue.run_repeating(
-            send_quiz,
-            interval=interval,
-            first=0,
-            context={"chat_id": chat_id, "used_questions": used_questions}
+        
+        await update.message.reply_text(
+            welcome_message,
+            parse_mode='Markdown'
         )
         
-def check_stats(update: Update, context: CallbackContext):
-    user_id = str(update.effective_user.id)
-    score = get_user_score(user_id)
-    update.message.reply_text(f"Your current score is: {score} points.")
+        bot_logger.log_command(update, '/start', True, {
+            'is_new_user': user.id not in game_manager.user_profiles,
+            'user_stats': {
+                'games_played': profile.games_played,
+                'games_won': profile.games_won
+            }
+        })
+        
+    except Exception as e:
+        bot_logger.log_error(e, 'start_command', {'user_id': update.effective_user.id})
+        bot_logger.log_command(update, '/start', False)
+        await update.message.reply_text("❌ Sorry, something went wrong. Please try again.")
 
-def show_leaderboard(update: Update, context: CallbackContext):
-    chat_id = update.message.chat_id
+async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /play command"""
+    try:
+        user = update.effective_user
+        profile = game_manager.get_user_profile(user.id, user.username, user.first_name)
+        
+        # Create inline keyboard with game options
+        keyboard = [
+            [InlineKeyboardButton("🎮 Quick Play", callback_data="quick_play")],
+            [InlineKeyboardButton("👥 Create Private Game", callback_data="create_private")],
+            [InlineKeyboardButton("🔗 Join Game with Code", callback_data="join_with_code")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            "🎲 **Choose your game mode:**",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+        
+        bot_logger.log_command(update, '/play', True)
+        
+    except Exception as e:
+        bot_logger.log_error(e, 'play_command', {'user_id': update.effective_user.id})
+        bot_logger.log_command(update, '/play', False)
+        await update.message.reply_text("❌ Sorry, something went wrong. Please try again.")
 
-    # Send initial loading message
-    loading_message = context.bot.send_message(chat_id=chat_id, text="Leaderboard is loading...")
+async def invite_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /invite command"""
+    try:
+        user = update.effective_user
+        
+        if not context.args:
+            await update.message.reply_text(
+                "❌ Please specify a username to invite!\n"
+                "Usage: `/invite @username`",
+                parse_mode='Markdown'
+            )
+            bot_logger.log_command(update, '/invite', False, {'error': 'no_username_provided'})
+            return
+        
+        target_username = context.args[0].replace('@', '')
+        
+        # Create game invitation
+        # Note: In a real implementation, you'd need to resolve the username to user_id
+        # For now, we'll create a placeholder invitation
+        invitation = game_manager.create_game_invitation(user.id, 0)  # 0 as placeholder
+        
+        invite_message = f"""
+🎮 **Game Invitation Created!**
 
-    # Send loading updates in a separate thread
-    def send_loading_messages(message_id):
-        for i in range(2, 4):
-            time.sleep(1)  # Wait for 1 second before sending the next message
-            context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=f"Leaderboard is loading...{i}")
+Hey @{target_username}! {user.first_name} has invited you to play Ludo!
 
-    loading_thread = threading.Thread(target=send_loading_messages, args=(loading_message.message_id,))
-    loading_thread.start()
+🔗 **Game Link:** {invitation.game_url}
+⏰ **Expires:** {invitation.expires_at.strftime('%Y-%m-%d %H:%M UTC')}
 
-    # Fetch and display the leaderboard
-    top_scores = get_top_scores(20)
-    loading_thread.join()  # Wait for the loading messages to finish
+Click the link to join the game!
+        """
+        
+        await update.message.reply_text(invite_message, parse_mode='Markdown')
+        
+        bot_logger.log_command(update, '/invite', True, {
+            'target_username': target_username,
+            'invitation_id': invitation.id
+        })
+        
+    except Exception as e:
+        bot_logger.log_error(e, 'invite_command', {
+            'user_id': update.effective_user.id,
+            'args': context.args
+        })
+        bot_logger.log_command(update, '/invite', False)
+        await update.message.reply_text("❌ Sorry, something went wrong. Please try again.")
 
-    if not top_scores:
-        context.bot.delete_message(chat_id=chat_id, message_id=loading_message.message_id)
-        update.message.reply_text("🏆 No scores yet! Start playing to appear on the leaderboard.")
-        return
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /stats command"""
+    try:
+        user = update.effective_user
+        profile = game_manager.get_user_profile(user.id, user.username, user.first_name)
+        
+        win_rate = (profile.games_won / max(profile.games_played, 1)) * 100
+        
+        stats_message = f"""
+📊 **Your Ludo Statistics**
 
-    # Delete the loading message
-    context.bot.delete_message(chat_id=chat_id, message_id=loading_message.message_id)
+👤 **Player:** {user.first_name} (@{user.username or 'No username'})
+🎮 **Games Played:** {profile.games_played}
+🏆 **Games Won:** {profile.games_won}
+📈 **Win Rate:** {win_rate:.1f}%
+📅 **Last Active:** {profile.last_active.strftime('%Y-%m-%d %H:%M UTC')}
 
-    # Prepare and send the leaderboard message
-    message = "🏆 *Quiz Leaderboard* 🏆\n\n"
-    medals = ["🥇", "🥈", "🥉"]
+🎯 Keep playing to improve your stats!
+        """
+        
+        await update.message.reply_text(stats_message, parse_mode='Markdown')
+        
+        bot_logger.log_command(update, '/stats', True, {
+            'user_stats': {
+                'games_played': profile.games_played,
+                'games_won': profile.games_won,
+                'win_rate': win_rate
+            }
+        })
+        
+    except Exception as e:
+        bot_logger.log_error(e, 'stats_command', {'user_id': update.effective_user.id})
+        bot_logger.log_command(update, '/stats', False)
+        await update.message.reply_text("❌ Sorry, something went wrong. Please try again.")
 
-    for rank, (user_id, score) in enumerate(top_scores, start=1):
-        try:
-            user = context.bot.get_chat(int(user_id))
-            username = f"@{user.username}" if user.username else f"{user.first_name} {user.last_name or ''}"
-        except Exception:
-            username = f"User {user_id}"
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /help command"""
+    try:
+        help_message = """
+🎲 **Ludo Game Bot Help** 🎲
 
-        rank_display = medals[rank - 1] if rank <= 3 else f"{rank}."
-        message += f"{rank_display}  *{username}* - {score} Points\n\n"
+**Available Commands:**
+/start - Welcome message and quick overview
+/play - Start playing Ludo (various game modes)
+/invite @username - Invite someone to play
+/stats - View your game statistics
+/help - Show this help message
 
-    update.message.reply_text(message, parse_mode="Markdown")
+**Game Modes:**
+🎮 **Quick Play** - Get matched with random players
+👥 **Private Game** - Create a game for friends only
+🔗 **Join with Code** - Join a specific game room
 
-def next_quiz(update: Update, context: CallbackContext):
-    chat_id = str(update.effective_chat.id)
-    chat_data = load_chat_data(chat_id)
+**How to Play:**
+1. Use /play to choose your game mode
+2. Wait for other players to join
+3. Click the game link when ready
+4. Play Ludo in your browser!
 
-    # Check if there are any active quizzes
-    if not chat_data.get("active", False):
-        update.message.reply_text("No active quiz. Use /start to begin a quiz session.")
-        return
+**Tips:**
+• Invite friends with /invite for more fun
+• Check your progress with /stats
+• Games expire after 24 hours
 
-    # Send the next quiz immediately
-    send_quiz_immediately(context, chat_id)
-    update.message.reply_text("Next quiz has been sent!")
+Need more help? Contact @yourusername
+        """
+        
+        await update.message.reply_text(help_message, parse_mode='Markdown')
+        
+        bot_logger.log_command(update, '/help', True)
+        
+    except Exception as e:
+        bot_logger.log_error(e, 'help_command', {'user_id': update.effective_user.id})
+        bot_logger.log_command(update, '/help', False)
+        await update.message.reply_text("❌ Sorry, something went wrong. Please try again.")
 
+# ================================
+# CALLBACK QUERY HANDLERS
+# ================================
 
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle button callback queries"""
+    try:
+        query = update.callback_query
+        await query.answer()
+        
+        user = update.effective_user
+        data = query.data
+        
+        if data == "quick_play":
+            game_url = f"https://yourdomain.com/game/quick_{uuid.uuid4().hex[:8]}"
+            
+            await query.edit_message_text(
+                f"🎮 **Quick Play Game Created!**\n\n"
+                f"🔗 **Game Link:** {game_url}\n"
+                f"👥 **Waiting for players...**\n\n"
+                f"Share this link with friends or wait for random players to join!",
+                parse_mode='Markdown'
+            )
+            
+            bot_logger.log_structured('info', 'quick_play_created', {
+                'user_id': user.id,
+                'game_url': game_url
+            })
+        
+        elif data == "create_private":
+            game_code = uuid.uuid4().hex[:6].upper()
+            game_url = f"https://yourdomain.com/game/private_{game_code}"
+            
+            await query.edit_message_text(
+                f"👥 **Private Game Created!**\n\n"
+                f"🔗 **Game Link:** {game_url}\n"
+                f"🔑 **Game Code:** `{game_code}`\n\n"
+                f"Share the link or code with your friends!",
+                parse_mode='Markdown'
+            )
+            
+            bot_logger.log_structured('info', 'private_game_created', {
+                'user_id': user.id,
+                'game_code': game_code,
+                'game_url': game_url
+            })
+        
+        elif data == "join_with_code":
+            await query.edit_message_text(
+                "🔗 **Join Game with Code**\n\n"
+                "Please send me the game code to join an existing game.\n"
+                "Game codes are 6-character strings like: `ABC123`",
+                parse_mode='Markdown'
+            )
+            
+            # Set user state to waiting for game code
+            context.user_data['waiting_for_code'] = True
+            
+            bot_logger.log_structured('info', 'join_code_requested', {
+                'user_id': user.id
+            })
+        
+        bot_logger.log_structured('info', 'button_callback', {
+            'user_id': user.id,
+            'callback_data': data
+        })
+        
+    except Exception as e:
+        bot_logger.log_error(e, 'button_callback', {
+            'user_id': update.effective_user.id,
+            'callback_data': update.callback_query.data if update.callback_query else None
+        })
+        await update.callback_query.answer("❌ Something went wrong. Please try again.")
 
+# ================================
+# MESSAGE HANDLERS
+# ================================
 
-
-
-def main():
-    updater = Updater(TOKEN, use_context=True)
-    dp = updater.dispatcher
-    
-    dp.add_handler(CommandHandler("start", start_command))
-    dp.add_handler(CommandHandler("setinterval", set_interval))
-    dp.add_handler(CommandHandler("stopquiz", stop_quiz))
-    dp.add_handler(CommandHandler("pause", pause_quiz))
-    dp.add_handler(CommandHandler("resume", resume_quiz))
-    dp.add_handler(CommandHandler("next", next_quiz))
-    dp.add_handler(CallbackQueryHandler(button))
-    # Command and callback query handlers
-
-    dp.add_handler(PollAnswerHandler(handle_poll_answer))
-    dp.add_handler(CommandHandler("leaderboard", show_leaderboard))
-    dp.add_handler(CommandHandler("broadcast", broadcast))
-    dp.add_handler(CommandHandler("stats", check_stats))
-
-
-
-    
-    updater.start_polling()
-    updater.job_queue.run_once(restart_active_quizzes, 0)
-    updater.job_queue.run_daily(reset_active_chats, time=time(0, 0))
-
-    updater.idle()
-
-if __name__ == '__main__':
-    main()
+async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle text messages (like game codes)"""
+    try:
+        user = update.effective_user
+        message_text = update.message.text
+        
+        # Check if user is waiting for a game code
+        if context.user_data.get('waiting_for_code'):
+            # Validate game code format (6 characters, alphanumeric)
+            if len(message_text) == 6 and message_text.isalnum():
+                game_url = f"https://yourdomain.com/game/private_{message_text.upper()}"
+                
+                await update.message.reply_text(
+                    f"✅ **Joining Game!**\n\n"
+                    f"🔗 **Game Link:** {game_url}\n"
+                    f"🔑 **Code:** `{message_text.upper()}`\n\n"
+                    f"Click the link to join the game!",
+                    parse_mode='Markdown'
+                )
